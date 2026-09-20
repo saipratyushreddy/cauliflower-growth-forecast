@@ -1,12 +1,20 @@
 """
-Step 6: Train the CNN-LSTM and evaluate on held-out test plants.
+Step 6: Train ONE CNN-LSTM configuration and evaluate it on held-out test
+plants.
 
-Trains with early stopping on validation MAE (raw units). Reports MAE/RMSE
-on the same shared-evaluation-set convention established in Step 5
-(src/baselines.py): predictions are dumped per-pair with pair_id =
-plant_id::target_day, and the headline test comparison against the
-Step 5 baselines is recomputed on the intersection of pair_ids all three
-methods can predict.
+For hyperparameter search, use sweep_cnn_lstm.py instead -- it selects the
+winning config by VALIDATION MAE only and touches test exactly once, for
+that single winner, so the plant-wise test split is never used for model
+selection. This script, when run directly with a single hand-picked
+config, also only touches test once (there's only one config to begin
+with), so it's safe standalone, but is NOT what should be used to report
+"the best config found" -- that requires sweep_cnn_lstm.py's discipline.
+
+Reports MAE/RMSE on the same shared-evaluation-set convention established
+in Step 5 (src/baselines.py): predictions are dumped per-pair with
+pair_id = plant_id::target_day, and the headline test comparison against
+the Step 5 baselines is recomputed on the intersection of pair_ids all
+three methods can predict.
 
 Also produces predicted-vs-actual growth curve plots for a handful of
 individual test plants (saved to outputs/).
@@ -28,68 +36,12 @@ import os
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import torch
-from sklearn.metrics import mean_absolute_error, mean_squared_error
-from torch.utils.data import DataLoader
 
-from cnn_lstm_dataset import CNNLSTMDataset, collate_fn
-from cnn_lstm_model import CNNLSTM
-
-
-def mae_rmse(y_true, y_pred):
-    mae = mean_absolute_error(y_true, y_pred)
-    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
-    return mae, rmse
-
-
-def make_pair_id(df):
-    return df["plant_id"].astype(str) + "::" + df["target_day"].astype(str)
-
-
-def run_epoch(model, loader, device, optimizer=None):
-    is_train = optimizer is not None
-    model.train() if is_train else model.eval()
-
-    total_loss = 0.0
-    n_samples = 0
-    loss_fn = torch.nn.MSELoss()
-
-    with torch.set_grad_enabled(is_train):
-        for batch in loader:
-            features = batch["features"].to(device)
-            lengths = batch["lengths"]
-            target_norm = batch["target_norm"].to(device)
-
-            pred_norm = model(features, lengths)
-            loss = loss_fn(pred_norm, target_norm)
-
-            if is_train:
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
-            total_loss += loss.item() * features.shape[0]
-            n_samples += features.shape[0]
-
-    return total_loss / n_samples
-
-
-@torch.no_grad()
-def predict(model, loader, device, target_mean, target_std):
-    model.eval()
-    pair_ids, y_true, y_pred = [], [], []
-    for batch in loader:
-        features = batch["features"].to(device)
-        lengths = batch["lengths"]
-        pred_norm = model(features, lengths).cpu().numpy()
-        pred_raw = pred_norm * target_std + target_mean
-
-        pair_ids.extend(batch["pair_id"])
-        y_true.extend(batch["target_raw"].numpy().tolist())
-        y_pred.extend(pred_raw.tolist())
-    return pd.DataFrame({"pair_id": pair_ids, "y_true": y_true, "y_pred": y_pred})
+from cnn_lstm_train_core import (
+    mae_rmse, make_pair_id, predict, build_datasets, train_one_config,
+)
 
 
 def main():
@@ -113,9 +65,6 @@ def main():
     ap.add_argument("--n-plot-plants", type=int, default=6)
     args = ap.parse_args()
 
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
-
     device = torch.device(args.device)
 
     pairs_df = pd.read_parquet(args.pairs_split)
@@ -126,67 +75,40 @@ def main():
         norm_stats = json.load(f)
     target_mean = norm_stats["target_diameter_mean"]
     target_std = norm_stats["target_diameter_std"]
-    day_mean = norm_stats["day_after_planting_mean"]
-    day_std = norm_stats["day_after_planting_std"]
 
-    train_df = pairs_df[pairs_df["split"] == "train"]
-    val_df = pairs_df[pairs_df["split"] == "val"]
-    test_df = pairs_df[pairs_df["split"] == "test"]
-
-    common_kwargs = dict(
-        embeddings_dir=args.embeddings_dir,
-        day_mean=day_mean, day_std=day_std,
-        target_mean=target_mean, target_std=target_std,
+    train_ds, val_ds, test_ds, train_df, val_df, test_df = build_datasets(
+        pairs_df, args.embeddings_dir, norm_stats
     )
-    train_ds = CNNLSTMDataset(train_df, **common_kwargs)
-    val_ds = CNNLSTMDataset(val_df, **common_kwargs)
-    test_ds = CNNLSTMDataset(test_df, **common_kwargs)
-
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn)
-    test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn)
-
-    model = CNNLSTM(input_dim=513, hidden_dim=args.hidden_dim,
-                     num_layers=args.num_layers, dropout=args.dropout).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     os.makedirs(args.checkpoint_dir, exist_ok=True)
-    best_ckpt_path = os.path.join(args.checkpoint_dir, "cnn_lstm_best.pt")
+    ckpt_path = os.path.join(args.checkpoint_dir, "cnn_lstm_best.pt")
 
-    best_val_mae = np.inf
-    epochs_without_improvement = 0
-    history = []
+    config = {
+        "hidden_dim": args.hidden_dim, "num_layers": args.num_layers,
+        "dropout": args.dropout, "batch_size": args.batch_size,
+        "lr": args.lr, "max_epochs": args.max_epochs, "patience": args.patience,
+    }
 
     print(f"Training on {device}, {len(train_ds)} train / {len(val_ds)} val / {len(test_ds)} test samples")
-    for epoch in range(1, args.max_epochs + 1):
-        train_loss = run_epoch(model, train_loader, device, optimizer=optimizer)
-        val_preds = predict(model, val_loader, device, target_mean, target_std)
-        val_mae, val_rmse = mae_rmse(val_preds["y_true"], val_preds["y_pred"])
-
-        history.append({"epoch": epoch, "train_loss_norm_mse": train_loss, "val_mae": val_mae, "val_rmse": val_rmse})
-        print(f"Epoch {epoch:3d}  train_loss(norm MSE)={train_loss:.4f}  val_MAE={val_mae:.3f}  val_RMSE={val_rmse:.3f}")
-
-        if val_mae < best_val_mae:
-            best_val_mae = val_mae
-            epochs_without_improvement = 0
-            torch.save(model.state_dict(), best_ckpt_path)
-        else:
-            epochs_without_improvement += 1
-            if epochs_without_improvement >= args.patience:
-                print(f"Early stopping at epoch {epoch} (no val improvement for {args.patience} epochs). "
-                      f"Best val MAE={best_val_mae:.3f}")
-                break
-
-    # Reload best checkpoint before final test evaluation.
-    model.load_state_dict(torch.load(best_ckpt_path, weights_only=True))
+    best_val_mae, best_val_rmse, history, _ = train_one_config(
+        train_ds, val_ds, config, device, ckpt_path,
+        target_mean, target_std, seed=args.seed, verbose=True,
+    )
 
     os.makedirs(args.out_dir, exist_ok=True)
     with open(os.path.join(args.out_dir, "step6_training_history.json"), "w") as f:
         json.dump(history, f, indent=2)
 
-    # ============================================================
-    # Test evaluation
-    # ============================================================
+    # Reload best checkpoint before the SINGLE test evaluation.
+    from cnn_lstm_model import CNNLSTM
+    model = CNNLSTM(input_dim=513, hidden_dim=args.hidden_dim,
+                     num_layers=args.num_layers, dropout=args.dropout).to(device)
+    model.load_state_dict(torch.load(ckpt_path, weights_only=True))
+
+    from torch.utils.data import DataLoader
+    from cnn_lstm_dataset import collate_fn
+    test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn)
+
     print("\n" + "=" * 60)
     print("CNN-LSTM TEST EVALUATION")
     print("=" * 60)
@@ -261,7 +183,6 @@ def main():
                 "cnn_lstm_vs_persistence_mae_improvement_pct": lstm_vs_pers_mae,
             }
 
-            # Re-check the Step 5 size-quartile bias pattern on the LSTM's own residuals.
             print("\nSize-quartile bias check (same analysis as Step 5's single-frame residuals):")
             lstm_shared = test_preds[test_preds["pair_id"].isin(shared_ids)]
             corr = lstm_shared["y_true"].corr(lstm_shared["residual"])
