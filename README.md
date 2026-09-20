@@ -147,20 +147,45 @@ shard — see conversation history / commit log for the smoke-test procedure.
 ## Results (Step 5 — baselines)
 
 Evaluated on held-out test plants (110 plants, plant-wise split, seed=42).
-N differs slightly between baselines because persistence additionally
-requires the last input date to itself have a valid label, a stricter
-filter than single-frame's (which only needs the last input image to
-exist).
+Each method's own full-N test result is reported first (its honest,
+independently-eligible sample set); N differs slightly between methods
+because persistence additionally requires the last input date to itself
+have a valid label, a stricter filter than single-frame's (which only
+needs the last input image to exist, always true here given Step 4's
+0-failure embedding run).
 
 | Baseline | Test N (pairs / plants) | MAE | RMSE |
 |---|---|---|---|
 | Persistence (ŷ_{t+1} = y_t) | 1,057 / 110 | 9.068 | 10.914 |
 | Single-frame (ridge on frozen ResNet18 embedding, α=100, selected on val) | 1,060 / 110 | 5.962 | 8.736 |
 
-Single-frame clearly beats persistence (~34% lower MAE), giving a
-meaningful bar for the CNN-LSTM (Step 6) to clear: it must outperform not
-just "assume no change" but also a purely non-temporal visual regressor
-before temporal modeling can be said to add value.
+**Shared-evaluation-set convention:** since methods can have different
+eligible test sets, head-to-head comparisons are computed on the
+*intersection* of pair_ids (`plant_id::target_day`, asserted unique) every
+compared method can predict, not on each method's own full-N set. On the
+shared 1,057-pair intersection: persistence MAE=9.068/RMSE=10.914,
+single-frame MAE=5.914/RMSE=8.657 — **single-frame improves MAE by 34.8%
+and RMSE by 20.7%** (close to the naive full-N deltas, confirming the 3
+single-frame-only pairs weren't meaningfully skewing the comparison, but
+this is now the correct number to cite and the convention Step 6 will
+also follow). Full per-pair predictions/residuals are dumped to
+`outputs/step5_<method>_test_predictions.csv`.
+
+**Why MAE improved more (34.8%) than RMSE (20.7%) for single-frame —
+residual analysis:** correlation(true diameter, residual) = **-0.355** on
+single-frame's test predictions — a moderate regression-to-the-mean
+effect: the model over-predicts small plants and under-predicts large
+ones (mean residual +2.6 in the bottom quartile of true diameter, -5.7 in
+the top quartile). MAE actually rises monotonically with true diameter
+(bottom quartile 4.74 → mid 6.15 → top quartile 6.79), and the 32 worst
+misses (>20mm absolute error) are concentrated in just a few plants: 9 of
+32 come from a single plant (`2021_Ref_Plot2_A1`), 7 from another
+(`2021_Ref_Plot2_E18`) — over half the worst misses from 2 of 110 test
+plants. This is a concrete, testable hypothesis for Step 6: a temporal
+sequence should let the LSTM recognize "this plant has consistently been
+small/large across prior frames" rather than guessing from one ambiguous
+image, which should specifically reduce the top/bottom-quartile bias —
+worth re-checking this same quartile breakdown on the LSTM's results.
 
 ```bash
 python src/baselines.py \
