@@ -323,6 +323,27 @@ explicitly, deliberately including the unflattering one:
   harvest-related handling affecting the visible canopy) that the model
   saw comparatively little training signal for (83% of pairs are
   monotonic growth) — not generic scattered measurement noise.
+- **Two individual test plants with outsized error, traced to a mix of
+  causes — not fully explained by the late-season pattern alone.**
+  Step 5 found 2 of 110 test plants (`2021_Ref_Plot2_A1`,
+  `2021_Ref_Plot2_E18`) accounted for over half the single-frame
+  baseline's worst misses. Both have flat-or-decline rates well above
+  average (42.9% and 41.7% vs. 17.0% test-wide), so the late-season
+  pattern above explains a real part of it. But a follow-up check found
+  each also has a distinct, traceable issue: (1) `2021_Ref_Plot2_A1`'s
+  single largest error (50.2mm) stems from one upstream raw measurement,
+  `"58 (7)"` at day 35, cleaned to 58 under the Step 2 "use X, discard Y"
+  rule — the surrounding trajectory (`33→58→14→16→30→39...`) suggests the
+  discarded value (7) was plausibly closer to the true reading, meaning
+  this specific data point may be an artifact of that cleaning decision
+  rather than real growth; (2) `2021_Ref_Plot2_E18` has a day-44
+  measurement explicitly marked missing with the field comment *"not
+  measureable due to grass-overgrowth"* — a genuine, documented
+  data-quality event distinct from the late-season biological story. Not
+  corrected here (would require re-deciding the Step 2 cleaning rule for
+  a single record), but worth flagging as a concrete example of how a
+  reasonable global cleaning rule can occasionally produce a local
+  outlier.
 - **Small phenotyped-plant population.** Only 739 plants carry the
   in-situ trait labels needed for regression (`task=='reference'` in the
   HF release), not the ~14,000 originally assumed — this constrains both
