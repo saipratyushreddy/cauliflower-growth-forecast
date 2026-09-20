@@ -1,14 +1,37 @@
 # Cauliflower Growth Forecasting (GrowliFlower CNN-LSTM Baseline)
 
-Phase 1 goal: a working, evaluated CNN-LSTM baseline that predicts one
-cauliflower growth trait at the next measured timepoint, from a UAV image
-time series, using the [GrowliFlower dataset](https://huggingface.co/datasets/Voxel51/GrowliFlower)
-(curated FiftyOne release, `Voxel51/GrowliFlower`).
+**Phase 1 of a two-phase project.** The full project goal, as scoped by
+the course/research prompt, is to compare **three** approaches for
+forecasting cauliflower growth traits from UAV image time series:
+(1) simple baselines, (2) a CNN-LSTM, and (3) a CNN-Transformer. This
+repository implements and rigorously evaluates the first two — baselines
+and CNN-LSTM — against real data on UNL's Swan HPC cluster. **The
+CNN-Transformer, multi-trait regression, and a missing-observation
+robustness test are Phase 2, deliberately not started here** (see
+[Phase 2 — planned, not started](#phase-2--planned-not-started) below).
+This is a checkpoint, not the finished project.
 
-Runs on UNL Holland Computing Center's Swan cluster (SLURM). Local machine
-is used only for lightweight metadata inspection/pipeline construction (no
-GPU, no full image downloads) — anything touching the actual images or a
-GPU runs on Swan.
+## Dataset
+
+[GrowliFlower](https://huggingface.co/datasets/Voxel51/GrowliFlower)
+(curated FiftyOne release, `Voxel51/GrowliFlower`), consolidating the
+`GrowliFlowerL`/`R`/`D` subsets from the original release:
+
+> Kierdorf, J., Junker-Frohn, L. V., Delaney, M., Olave, M. D., Burkart,
+> A., Jaenicke, H., Muller, O., Rascher, U., & Roscher, R. (2022).
+> GrowliFlower: An image time series dataset for GROWth analysis of
+> cauLIFLOWER. *arXiv preprint arXiv:2204.00294*.
+
+**License caveat (unresolved):** no license is stated in the PhenoRoam
+catalog record, the shipped dataset card, or the source paper. This
+should be confirmed with the corresponding author (Jana Kierdorf,
+`jkierdorf@uni-bonn.de`) before any wider sharing, publication, or reuse
+beyond this internal research checkpoint.
+
+Runs on UNL Holland Computing Center's Swan cluster (SLURM). Local
+machine is used only for lightweight metadata inspection/pipeline
+construction (no GPU, no full image downloads) — anything touching the
+actual images or a GPU runs on Swan.
 
 ## Task definition
 
@@ -37,8 +60,8 @@ data/            Metadata/pairs/embeddings artifacts (gitignored; regenerate via
 src/             Pipeline scripts
 scripts/         SLURM job scripts
 notebooks/       Exploration only, not part of the pipeline
-outputs/         Reports, plots, saved figures
-checkpoints/     Trained model weights
+outputs/         Reports, plots, saved figures (gitignored; regenerate via scripts below)
+checkpoints/     Trained model weights (gitignored; regenerate via scripts below)
 ```
 
 ## Environment setup
@@ -49,9 +72,10 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-On Swan, install a CUDA-matched `torch`/`torchvision` build (check
-`module avail cuda` and pick the matching PyTorch wheel) rather than relying
-on the generic `pip install torch` resolution used for local CPU-only work.
+On Swan, `pip install torch` pulls a CUDA-enabled build automatically
+(bundled `nvidia-cu12*` runtime packages — confirmed via
+`torch.__version__` showing `+cu128`); no separate `module load cuda` is
+needed on this cluster.
 
 ## Pipeline (run in order)
 
@@ -122,9 +146,53 @@ dict of `{"filepaths": [...], "embeddings": FloatTensor[N, 512]}`, ordered
 by `day_after_planting`), indexed by `data/embeddings/embedding_index.parquet`
 (`image_id -> (shard_file, offset, plant_id, embedding_dim)`).
 
-Validated locally on 18 real images (2 plants) before running on Swan,
-including the resumability logic under a simulated partial/interrupted
-shard — see conversation history / commit log for the smoke-test procedure.
+Validated locally on real images before running on Swan, including the
+resumability logic under a simulated partial/interrupted shard.
+
+### Step 5 — Persistence and single-frame baselines
+```bash
+python src/baselines.py \
+    --pairs-split data/pairs_split.parquet \
+    --metadata data/metadata.parquet \
+    --embeddings-dir data/embeddings \
+    --norm-stats data/norm_stats.json \
+    --out-dir outputs
+```
+(a) Persistence: ŷ_{t+1} = y_t, only for pairs where the last input date
+itself has a valid label. (b) Single-frame: ridge regression on the last
+cached ResNet18 embedding only, alpha selected on val. Introduces the
+`pair_id` (`plant_id::target_day`) and **shared-evaluation-set**
+convention used for every cross-method comparison from here on (see
+Results below).
+
+### Step 6 — CNN-LSTM (single config, then hyperparameter sweep)
+```bash
+# Single manually-chosen config (kept only as a documented comparison point)
+python src/train_cnn_lstm.py \
+    --pairs-split data/pairs_split.parquet --embeddings-dir data/embeddings \
+    --norm-stats data/norm_stats.json --baseline-results outputs/step5_baseline_results.json \
+    --out-dir outputs --checkpoint-dir checkpoints \
+    --device cuda --hidden-dim 128 --num-layers 1 --batch-size 64 --lr 1e-3 \
+    --max-epochs 200 --patience 15 --seed 42
+
+# 18-config hyperparameter sweep (the reported Step 6 result) -- SLURM job:
+sbatch scripts/sweep_cnn_lstm.slurm
+```
+Unidirectional (causal) LSTM over ordered cached embeddings + normalized
+day-after-planting, early-stopped on val MAE. The sweep selects its
+winning config by **validation MAE only** and touches test **exactly
+once**, for that single winner — see Results below and
+`src/sweep_cnn_lstm.py`'s docstring for the full model-selection
+discipline and why it matters.
+
+### Monotonicity/structural-limitation analysis
+```bash
+python src/analyze_monotonicity.py \
+    --pairs-split data/pairs_split.parquet --metadata data/metadata.parquet \
+    --cnn-lstm-predictions outputs/step6_cnn_lstm_sweep_winner_test_predictions.csv
+```
+Quantifies the late-season non-monotonic structural limitation described
+below.
 
 ## Data characteristics worth carrying into limitations
 
@@ -144,72 +212,45 @@ shard — see conversation history / commit log for the smoke-test procedure.
 - Input sequence length across all 7,031 pairs: min 1, median 5, max 14
   frames.
 
-## Results (Step 5 — baselines)
+## Results
 
-Evaluated on held-out test plants (110 plants, plant-wise split, seed=42).
-Each method's own full-N test result is reported first (its honest,
-independently-eligible sample set); N differs slightly between methods
-because persistence additionally requires the last input date to itself
-have a valid label, a stricter filter than single-frame's (which only
-needs the last input image to exist, always true here given Step 4's
-0-failure embedding run).
+All held-out evaluation is on **110 test plants** (plant-wise 70/15/15
+split, seed=42, zero plant overlap across splits — see Step 3c). Because
+different methods have slightly different eligible sample sets (e.g.
+persistence additionally needs the last input date to itself carry a
+valid label), **every cross-method comparison below uses the
+shared-evaluation-set convention**: metrics are recomputed on the
+*intersection* of `pair_id`s (`plant_id::target_day`, asserted unique)
+every compared method can predict — currently **1,057 of 1,060** test
+pairs. Each method's own full-N result is also reported where relevant.
 
-| Baseline | Test N (pairs / plants) | MAE | RMSE |
+| Method | Shared-set N | MAE | RMSE |
 |---|---|---|---|
-| Persistence (ŷ_{t+1} = y_t) | 1,057 / 110 | 9.068 | 10.914 |
-| Single-frame (ridge on frozen ResNet18 embedding, α=100, selected on val) | 1,060 / 110 | 5.962 | 8.736 |
+| Persistence (ŷ_{t+1} = y_t) | 1,057 | 9.068 | 10.914 |
+| Single-frame (ridge on frozen ResNet18 embedding, α=100, selected on val) | 1,057 | 5.914 | 8.657 |
+| CNN-LSTM (single manual config: hidden=128, 1 layer, lr=1e-3) | 1,057 | 5.373 | 8.350 |
+| **CNN-LSTM (18-config sweep winner: hidden=256, 2 layers, lr=1e-3, dropout=0.2)** | **1,057** | **5.134** | **8.055** |
 
-**Shared-evaluation-set convention:** since methods can have different
-eligible test sets, head-to-head comparisons are computed on the
-*intersection* of pair_ids (`plant_id::target_day`, asserted unique) every
-compared method can predict, not on each method's own full-N set. On the
-shared 1,057-pair intersection: persistence MAE=9.068/RMSE=10.914,
-single-frame MAE=5.914/RMSE=8.657 — **single-frame improves MAE by 34.8%
-and RMSE by 20.7%** (close to the naive full-N deltas, confirming the 3
-single-frame-only pairs weren't meaningfully skewing the comparison, but
-this is now the correct number to cite and the convention Step 6 will
-also follow). Full per-pair predictions/residuals are dumped to
-`outputs/step5_<method>_test_predictions.csv`.
+Sweep-winner CNN-LSTM improves MAE by **13.2%** and RMSE by **7.0%** over
+single-frame, and **43.4%** MAE over persistence — temporal modeling adds
+real, measured value on top of a purely non-temporal visual signal.
 
-**Why MAE improved more (34.8%) than RMSE (20.7%) for single-frame —
-residual analysis:** correlation(true diameter, residual) = **-0.355** on
-single-frame's test predictions — a moderate regression-to-the-mean
-effect: the model over-predicts small plants and under-predicts large
-ones (mean residual +2.6 in the bottom quartile of true diameter, -5.7 in
-the top quartile). MAE actually rises monotonically with true diameter
-(bottom quartile 4.74 → mid 6.15 → top quartile 6.79), and the 32 worst
-misses (>20mm absolute error) are concentrated in just a few plants: 9 of
-32 come from a single plant (`2021_Ref_Plot2_A1`), 7 from another
-(`2021_Ref_Plot2_E18`) — over half the worst misses from 2 of 110 test
-plants. This is a concrete, testable hypothesis for Step 6: a temporal
-sequence should let the LSTM recognize "this plant has consistently been
-small/large across prior frames" rather than guessing from one ambiguous
-image, which should specifically reduce the top/bottom-quartile bias —
-worth re-checking this same quartile breakdown on the LSTM's results.
+Own full-N test results (each method's independently-eligible set, not
+used for the comparisons above): persistence N=1,057/110 plants,
+single-frame N=1,060/110 plants, CNN-LSTM N=1,060/110 plants.
 
+Full commands for each result:
 ```bash
-python src/baselines.py \
-    --pairs-split data/pairs_split.parquet \
-    --metadata data/metadata.parquet \
-    --embeddings-dir data/embeddings \
-    --norm-stats data/norm_stats.json \
-    --out-dir outputs
+python src/baselines.py --pairs-split data/pairs_split.parquet --metadata data/metadata.parquet \
+    --embeddings-dir data/embeddings --norm-stats data/norm_stats.json --out-dir outputs
+
+python src/sweep_cnn_lstm.py --pairs-split data/pairs_split.parquet --embeddings-dir data/embeddings \
+    --norm-stats data/norm_stats.json --baseline-results outputs/step5_baseline_results.json \
+    --out-dir outputs --checkpoint-dir checkpoints --device cuda \
+    --batch-size 64 --max-epochs 200 --patience 15 --seed 42
 ```
 
-## Results (Step 6 — CNN-LSTM)
-
-Unidirectional (causal) LSTM over the ordered cached ResNet18 embeddings +
-normalized day-after-planting per timestep, trained with early stopping on
-val MAE (raw units). All runs on an NVIDIA A30 GPU on Swan, clean `.err`
-logs (no warnings).
-
-**First, a single manually-chosen config** (hidden_dim=128, 1 layer,
-lr=1e-3) was trained as an initial check (stopped at epoch 29, best val
-MAE=5.138). **This was later superseded by a proper 18-config
-hyperparameter sweep** (`src/sweep_cnn_lstm.py`) — the manual run is kept
-below only as a documented comparison point, not the final result.
-
-### Hyperparameter sweep (the actual Step 6 result)
+### Hyperparameter sweep detail
 
 Grid: `hidden_dim ∈ {64,128,256} × lr ∈ {1e-3,3e-4} × num_layers ∈ {1,2}`,
 with `dropout ∈ {0.0,0.2}` swept only for `num_layers=2` (dropout is a
@@ -220,96 +261,107 @@ risk from deeper models given only 517 training plants.
 MAE only**; test is evaluated **exactly once**, for the single config with
 the best val MAE, after the full grid finishes (verified in the run log:
 `grep -c "TEST EVALUATION"` = 1, not 18). This mirrors the same principle
-already used for the ridge alpha sweep in Step 5's baseline — the test
-split is never used for model selection, only for final reporting.
-
-```bash
-python src/sweep_cnn_lstm.py \
-    --pairs-split data/pairs_split.parquet \
-    --embeddings-dir data/embeddings \
-    --norm-stats data/norm_stats.json \
-    --baseline-results outputs/step5_baseline_results.json \
-    --out-dir outputs \
-    --checkpoint-dir checkpoints \
-    --device cuda --batch-size 64 --max-epochs 200 --patience 15 --seed 42
-```
-
-**Winning config: `h256_lr0.001_L2_d0.2`** (hidden_dim=256, lr=1e-3,
-2 layers, dropout=0.2), val MAE=5.007 — full 18-config table in
-`outputs/step6_sweep_results.csv`.
+already used for the ridge alpha sweep in Step 5 — the test split is
+never used for model selection, only for final reporting.
 
 The full grid spans val MAE **5.007–5.448**, under 9% spread top-to-bottom
-— a fairly flat hyperparameter landscape. The original manual config
-(val MAE=5.138) landed 4th of 18, meaning the manual choice was already
-reasonable; the sweep found a modest, not dramatic, improvement.
+— a fairly flat hyperparameter landscape. The manually-chosen config
+(val MAE=5.138) landed 4th of 18, meaning the manual starting point was
+already reasonable; the sweep found a modest, not dramatic, improvement.
+Full 18-config table: `outputs/step6_sweep_results.csv`.
 
-**Shared-evaluation-set comparison** (same convention as Step 5 — all
-methods restricted to the 1,057 test pairs every one of them can predict):
+### Residual bias: a consistent trend across three modeling stages
 
-| Method | MAE | RMSE |
-|---|---|---|
-| Persistence | 9.068 | 10.914 |
-| Single-frame | 5.914 | 8.657 |
-| CNN-LSTM (manual config) | 5.373 | 8.350 |
-| **CNN-LSTM (sweep winner)** | **5.134** | **8.055** |
+correlation(true diameter, residual) improved monotonically across every
+stage of modeling sophistication:
 
-Sweep winner improves MAE by **13.2%** and RMSE by **7.0%** over
-single-frame, and **43.4%** MAE over persistence.
-
-**Size-quartile bias — a consistent trend across three modeling stages:**
-correlation(true diameter, residual) improved monotonically:
 **-0.355** (single-frame) → **-0.265** (manual CNN-LSTM) →
-**-0.215** (sweep-tuned CNN-LSTM). Architecture capacity and light
-regularization measurably chip away at the regression-to-the-mean bias
-at each stage, though it is not eliminated (top-quartile mean residual
-is still -2.95mm for the tuned model, down from -5.66mm for single-frame).
+**-0.215** (sweep-tuned CNN-LSTM)
 
-### Structural limitation: late-season non-monotonic segments
+More temporal context and light regularization measurably chip away at a
+regression-to-the-mean bias (over-predicting small plants, under-predicting
+large ones) at each stage, though it is not eliminated (top-quartile mean
+residual is still -2.95mm for the tuned model, down from -5.66mm for
+single-frame). Bottom-quartile MAE improved the most across stages.
 
-A spot-check of growth-curve plots (`outputs/step6_growth_curve_<plant_id>.png`,
-6 test plants) found one case (`2020_Ref_Plot1_A93`) where the model
-over-predicted through a real late-season plateau/decline in the actual
-measurements (54→48→44mm). A full quantitative follow-up
-(`src/analyze_monotonicity.py`) confirmed this is a systematic pattern,
-not a one-off:
+### Growth curve plots
 
-- **Threshold used (exact, no noise band):** a pair is "flat-or-decline"
-  when `target_diameter <= y_t` (delta ≤ 0mm, where y_t is the diameter at
-  the pair's own last input date); "strictly declining" is `target_diameter
-  < y_t`.
-- **17.0%** of test pairs (180/1,057) are flat-or-decline; **79.1%** of
-  test plants (87/110) have at least one such segment.
-- **Magnitude — mostly real, not measurement jitter:** only 12.8% of
-  flat-or-decline pairs are exact ties and 25.6% fall in a jitter-plausible
-  (-2, 0)mm band; **47.8% are ≥5mm declines** (median delta -4mm, mean
-  -6.5mm, min -44mm).
-- **Strongly concentrated late-season, not scattered evenly** — this was
-  checked explicitly since the two explanations imply very different
-  limitations. Using each pair's normalized position within its own
-  plant's trajectory (0=earliest measurement, 1=latest): flat-or-decline
-  segments have median position **0.81** vs **0.41** for growth segments.
-  By season quartile, only 2.5–10% of early/mid-season pairs are
-  flat-or-decline vs **41.3%** in the last quartile. Across the full
-  738-plant population (not just test), **83.8%** of all declines fall in
-  the late half of a plant's own trajectory.
-- **CNN-LSTM error concentrates specifically on these segments:** MAE is
-  4.243 on growth segments vs **9.477** on flat-or-decline segments
-  (**2.23x worse**), and 10.372 on strictly-declining segments. Overall
-  test MAE also rises steadily by season quartile (2.61→4.26→5.93→7.62),
-  so late season is harder in general, but declines within it are
-  disproportionately harder still.
+6 test plants plotted (predicted vs. actual diameter over
+day-after-planting), both for the manual config
+(`outputs/step6_growth_curve_<plant_id>.png`) and the sweep winner
+(`outputs/step6_sweep_growth_curve_<plant_id>.png`). Two are called out
+explicitly, deliberately including the unflattering one:
 
-**Honest framing for limitations:** this is a real, late-season biological
-transition (consistent with senescence, head-formation dynamics, or
-harvest-related handling affecting the visible canopy) that the model saw
-comparatively little training signal for — not generic measurement noise
-scattered through the season. The model is trained predominantly on
-monotonic growth segments (83% of pairs) and measurably underperforms on
-the non-monotonic, late-season minority.
+- `2020_Ref_Plot1_A10` — predicted tracks actual closely across the full
+  trajectory (good fit).
+- `2020_Ref_Plot1_A93` — the model over-predicts through a real
+  late-season plateau/decline in the actual measurements (54→48→44mm) —
+  a concrete instance of the structural limitation quantified below, kept
+  here rather than cherry-picked out.
+
+![Growth curve: good fit example](outputs/step6_growth_curve_2020_Ref_Plot1_A10.png)
+![Growth curve: late-season miss example](outputs/step6_growth_curve_2020_Ref_Plot1_A93.png)
+
+## Limitations
+
+- **Late-season non-monotonic structural bias (quantified, not
+  anecdotal).** A pair is "flat-or-decline" when `target_diameter <= y_t`
+  (delta ≤ 0mm vs. the plant's own last input measurement; exact
+  threshold, no noise band). 17.0% of test pairs (180/1,057) are
+  flat-or-decline; 79.1% of test plants (87/110) have at least one such
+  segment. This is mostly real, not measurement jitter: only 12.8% are
+  exact ties, while 47.8% are ≥5mm true declines (median delta -4mm, min
+  -44mm). It is also **strongly concentrated late-season**: flat-or-decline
+  segments have median normalized trajectory position 0.81 (vs. 0.41 for
+  growth segments), and the last season quartile is 41.3% flat-or-decline
+  vs. 2.5–10% elsewhere. Across the full 738-plant population, **83.8% of
+  all declines fall in the late half of a plant's own trajectory**. The
+  CNN-LSTM's error concentrates specifically on these segments: MAE 4.243
+  on growth segments vs. **9.477 on flat-or-decline segments (2.23x
+  worse)**. This reads as a real, late-season biological transition
+  (consistent with senescence, head-formation dynamics, or
+  harvest-related handling affecting the visible canopy) that the model
+  saw comparatively little training signal for (83% of pairs are
+  monotonic growth) — not generic scattered measurement noise.
+- **Small phenotyped-plant population.** Only 739 plants carry the
+  in-situ trait labels needed for regression (`task=='reference'` in the
+  HF release), not the ~14,000 originally assumed — this constrains both
+  training data volume (517 train plants) and how confidently results
+  generalize.
+- **Single target field/trait.** Results are for plant diameter only, on
+  two fields (Field1/2020, Field2/2021) with different growing seasons
+  and equipment (490×490px vs 256×256px crops). Not yet tested on other
+  traits (height, head diameter, BBCH stage) or pooled across a larger
+  set of fields/seasons.
+- **Variable forecast horizon.** Forecast gap between consecutive valid
+  measurements ranges from 2–42 days (median 7); the model is not
+  horizon-conditioned beyond the day-after-planting feature, so a 7-day
+  and a 40-day forecast are treated identically at the architecture level.
+- **Dataset license unresolved** (see Dataset section above) — confirm
+  with the corresponding author before any wider sharing or publication.
+
+## Phase 2 — planned, not started
+
+Explicitly out of scope for this checkpoint; not begun in this
+repository:
+
+1. **CNN-Transformer** model (in place of, or alongside, the CNN-LSTM),
+   using a **continuous positional encoding** (e.g. keyed on
+   day-after-planting rather than sequence index) to reflect the
+   irregular acquisition cadence documented above, evaluated with the
+   same shared-evaluation-set convention against the Step 5/6 results.
+2. **Multi-trait regression** — extending beyond plant diameter to
+   height, head diameter, and/or BBCH developmental stage, jointly or
+   per-trait.
+3. **Missing-observation robustness test** — evaluating how gracefully
+   each model degrades as input frames are synthetically dropped, given
+   the real-world irregularity already characterized above (6–15 dates
+   per plant, ~83% trait coverage per acquisition date).
 
 ## Status
 
-Steps 1–6 complete and verified on Swan:
+Steps 1–6 (baselines + CNN-LSTM, Phase 1 in full) complete and verified
+on Swan:
 - All pipeline artifacts (`data/metadata.parquet`, `data/pairs.parquet`,
   `data/pairs_split.parquet`, `data/norm_stats.json`) regenerated on Swan
   and confirmed to exactly match local runs (9,377 reference rows / 739
@@ -318,14 +370,12 @@ Steps 1–6 complete and verified on Swan:
   9,377/9,377 images downloaded (0 failures) and embedded (0 failures),
   739/739 plants have a shard file, index verified structurally correct.
 - Step 5 baselines run on Swan (CPU, login node — no GPU needed for ridge
-  regression on 512-dim vectors); results above.
-- Step 6 CNN-LSTM trained and evaluated on Swan (NVIDIA A30 GPU); results
-  above, including a shared-eval-set comparison against both Step 5
-  baselines and a re-check of Step 5's residual-bias hypothesis.
+  regression on 512-dim vectors).
+- Step 6 CNN-LSTM: single config then 18-config sweep, both trained and
+  evaluated on Swan (NVIDIA A30 GPU), with the shared-eval-set comparison
+  against Step 5 and the quantified late-season structural limitation.
 
-**Not yet run:** Step 7 (final SLURM job wrap-up — the CNN-LSTM SLURM
-script already exists at `scripts/train_cnn_lstm.slurm` and was used for
-the run above; Step 7 is mainly about consolidating this README's
-scattered results/limitations into a final summary). Do not start the
-Transformer model, multi-trait regression, or missing-data robustness
-experiments — out of scope for this phase.
+**This is the end of Phase 1.** Do not start the CNN-Transformer,
+multi-trait regression, or missing-observation robustness experiments
+without explicit approval — see [Phase 2](#phase-2--planned-not-started)
+above for what's next.
