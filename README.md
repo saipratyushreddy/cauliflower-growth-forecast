@@ -196,9 +196,63 @@ python src/baselines.py \
     --out-dir outputs
 ```
 
+## Results (Step 6 — CNN-LSTM)
+
+Unidirectional (causal) LSTM (hidden_dim=128, 1 layer) over the ordered
+cached ResNet18 embeddings + normalized day-after-planting per timestep,
+trained with early stopping on val MAE (raw units). Ran on an NVIDIA A30
+GPU on Swan; stopped at epoch 29 (best val MAE=5.138), clean `.err` log
+(no warnings). Full training/eval command:
+
+```bash
+python src/train_cnn_lstm.py \
+    --pairs-split data/pairs_split.parquet \
+    --embeddings-dir data/embeddings \
+    --norm-stats data/norm_stats.json \
+    --baseline-results outputs/step5_baseline_results.json \
+    --out-dir outputs \
+    --checkpoint-dir checkpoints \
+    --device cuda --hidden-dim 128 --num-layers 1 \
+    --batch-size 64 --lr 1e-3 --max-epochs 200 --patience 15 --seed 42
+```
+
+**Full test set** (CNN-LSTM's own eligible N, per method): N=1,060 pairs /
+110 plants, MAE=5.420, RMSE=8.428.
+
+**Shared-evaluation-set comparison** (same convention as Step 5 — all
+three methods restricted to the 1,057 test pairs every one of them can
+predict):
+
+| Method | MAE | RMSE |
+|---|---|---|
+| Persistence | 9.068 | 10.914 |
+| Single-frame | 5.914 | 8.657 |
+| **CNN-LSTM** | **5.373** | **8.350** |
+
+CNN-LSTM improves MAE by **9.2%** and RMSE by **3.6%** over single-frame,
+and by **40.7%** MAE over persistence — temporal modeling adds real value
+on top of the single-image visual signal.
+
+**Size-quartile bias hypothesis (from Step 5) — confirmed:**
+correlation(true diameter, residual) improved from **-0.355**
+(single-frame) to **-0.265** (CNN-LSTM). The LSTM's access to a plant's
+full growth trajectory measurably reduces (but does not eliminate) the
+regression-to-the-mean bias: bottom-quartile MAE improved most
+(4.74→3.74), though a top-quartile (large-plant) under-prediction bias
+persists (mean residual -4.09, down from -5.66).
+
+**Growth curve plots** for 6 test plants saved to
+`outputs/step6_growth_curve_<plant_id>.png`. Spot-checked two: one
+(`2020_Ref_Plot1_A10`) tracks the actual curve closely; another
+(`2020_Ref_Plot1_A93`) shows the model over-predicting and missing a
+late-season plateau/slight decline in the real measurements (54→48→44mm)
+— a concrete, visible instance of the persistent positive bias, kept here
+rather than cherry-picked out, since it's useful signal for the
+limitations section.
+
 ## Status
 
-Steps 1–5 complete and verified on Swan:
+Steps 1–6 complete and verified on Swan:
 - All pipeline artifacts (`data/metadata.parquet`, `data/pairs.parquet`,
   `data/pairs_split.parquet`, `data/norm_stats.json`) regenerated on Swan
   and confirmed to exactly match local runs (9,377 reference rows / 739
@@ -206,11 +260,15 @@ Steps 1–5 complete and verified on Swan:
 - Step 4 full run completed on an NVIDIA A30 GPU (`gpu` partition):
   9,377/9,377 images downloaded (0 failures) and embedded (0 failures),
   739/739 plants have a shard file, index verified structurally correct.
-
 - Step 5 baselines run on Swan (CPU, login node — no GPU needed for ridge
   regression on 512-dim vectors); results above.
+- Step 6 CNN-LSTM trained and evaluated on Swan (NVIDIA A30 GPU); results
+  above, including a shared-eval-set comparison against both Step 5
+  baselines and a re-check of Step 5's residual-bias hypothesis.
 
-**Not yet run:** Step 6 (CNN-LSTM), Step 7 (final SLURM job + results in
-this README, if not already folded in above). Do not start the
+**Not yet run:** Step 7 (final SLURM job wrap-up — the CNN-LSTM SLURM
+script already exists at `scripts/train_cnn_lstm.slurm` and was used for
+the run above; Step 7 is mainly about consolidating this README's
+scattered results/limitations into a final summary). Do not start the
 Transformer model, multi-trait regression, or missing-data robustness
 experiments — out of scope for this phase.
