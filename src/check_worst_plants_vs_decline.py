@@ -14,9 +14,11 @@ Usage:
     python src/check_worst_plants_vs_decline.py \
         --pairs-split data/pairs_split.parquet \
         --metadata data/metadata.parquet \
-        --single-frame-predictions outputs/step5_single_frame_test_predictions.csv
+        --single-frame-predictions outputs/step5_single_frame_test_predictions.csv \
+        --samples-json <path to samples.json, for in_situ_comment lookup>
 """
 import argparse
+import json
 
 import pandas as pd
 
@@ -32,6 +34,8 @@ def main():
     ap.add_argument("--pairs-split", required=True)
     ap.add_argument("--metadata", required=True)
     ap.add_argument("--single-frame-predictions", required=True)
+    ap.add_argument("--samples-json", default=None,
+                     help="Path to samples.json, for in_situ_comment lookup (metadata.parquet doesn't carry it)")
     args = ap.parse_args()
 
     pairs_df = pd.read_parquet(args.pairs_split)
@@ -82,12 +86,26 @@ def main():
 
     # Also check in_situ_comment for these 2 plants across their FULL history
     # (not just test pairs) for any documented stress/anomaly flag.
-    print("\n--- in_situ_comment for these 2 plants (full measured history) ---")
-    for plant_id in WORST_PLANTS:
-        plant_meta = meta_df[meta_df["plant_id"] == plant_id].sort_values("day_after_planting")
-        comments = plant_meta[["day_after_planting", "diameter", "in_situ_comment"]]
-        print(f"\n{plant_id}:")
-        print(comments.to_string(index=False))
+    # metadata.parquet doesn't carry in_situ_comment (only diameter survived
+    # the build_metadata.py cleaning pipeline), so read it fresh from
+    # samples.json here instead.
+    if args.samples_json:
+        print("\n--- in_situ_comment for these 2 plants (full measured history) ---")
+        with open(args.samples_json) as f:
+            samples = json.load(f)["samples"]
+        ref_samples = [s for s in samples if s.get("task") == "reference"]
+        for plant_id in WORST_PLANTS:
+            plant_samples = sorted(
+                [s for s in ref_samples if s.get("plant_id") == plant_id],
+                key=lambda s: s.get("day_after_planting"),
+            )
+            print(f"\n{plant_id}:")
+            for s in plant_samples:
+                print(f"  day={s.get('day_after_planting'):>3}  "
+                      f"diameter_raw={s.get('in_situ_diameter')!r:>10}  "
+                      f"comment={s.get('in_situ_comment')!r}")
+    else:
+        print("\n(--samples-json not provided; skipping in_situ_comment lookup)")
 
 
 if __name__ == "__main__":
