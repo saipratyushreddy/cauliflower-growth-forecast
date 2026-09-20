@@ -146,9 +146,16 @@ shard — see conversation history / commit log for the smoke-test procedure.
 
 ## Status
 
-Steps 1–4 complete (Step 4 written and locally smoke-tested; full run
-pending on Swan — see command blocks above). **Not yet run:** Step 5
-(persistence + single-frame baselines), Step 6 (CNN-LSTM), Step 7 (final
-SLURM job + results in this README). Do not start the Transformer model,
-multi-trait regression, or missing-data robustness experiments — out of
-scope for this phase.
+Steps 1–4 complete and verified on Swan:
+- All pipeline artifacts (`data/metadata.parquet`, `data/pairs.parquet`,
+  `data/pairs_split.parquet`, `data/norm_stats.json`) regenerated on Swan
+  and confirmed to exactly match local runs (9,377 reference rows / 739
+  plants, 7,031 pairs / 738 plants, 517/111/110 plant-wise split).
+- Step 4 full run completed on an NVIDIA A30 GPU (`gpu` partition):
+  9,377/9,377 images downloaded (0 failures) and embedded (0 failures),
+  739/739 plants have a shard file, index verified structurally correct.
+
+**Not yet run:** Step 5 (persistence + single-frame baselines), Step 6
+(CNN-LSTM), Step 7 (final SLURM job + results in this README). Do not
+start the Transformer model, multi-trait regression, or missing-data
+robustness experiments — out of scope for this phase.
