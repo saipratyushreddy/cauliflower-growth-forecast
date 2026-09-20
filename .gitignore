@@ -19,3 +19,4 @@ checkpoints/*
 # HF cache if ever pointed locally
 .cache/
 .claude/
+newREADME.md
