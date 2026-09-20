@@ -16,9 +16,6 @@ PROJECT_DIR="$WORK/cauliflower-growth-forecast"
 IMAGES_ROOT="$PROJECT_DIR/data/images"
 # -------------------------------------------------------
 
-module purge
-module load anaconda   # adjust to whatever Swan's actual module name is; confirm with `module spider anaconda` or `module avail python`
-
 cd "$PROJECT_DIR"
 source .venv/bin/activate   # created via: python -m venv .venv && pip install -r requirements.txt
 

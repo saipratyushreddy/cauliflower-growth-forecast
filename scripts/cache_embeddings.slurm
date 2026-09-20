@@ -18,10 +18,6 @@ PROJECT_DIR="$WORK/cauliflower-growth-forecast"
 IMAGES_ROOT="$PROJECT_DIR/data/images"
 # -------------------------------------------------------
 
-module purge
-module load anaconda   # adjust to whatever Swan's actual module name is
-module load cuda       # adjust to Swan's actual CUDA module name/version
-
 cd "$PROJECT_DIR"
 source .venv/bin/activate   # created via: python -m venv .venv && pip install -r requirements.txt
 
