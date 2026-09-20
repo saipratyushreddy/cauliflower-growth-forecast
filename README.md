@@ -198,57 +198,114 @@ python src/baselines.py \
 
 ## Results (Step 6 — CNN-LSTM)
 
-Unidirectional (causal) LSTM (hidden_dim=128, 1 layer) over the ordered
-cached ResNet18 embeddings + normalized day-after-planting per timestep,
-trained with early stopping on val MAE (raw units). Ran on an NVIDIA A30
-GPU on Swan; stopped at epoch 29 (best val MAE=5.138), clean `.err` log
-(no warnings). Full training/eval command:
+Unidirectional (causal) LSTM over the ordered cached ResNet18 embeddings +
+normalized day-after-planting per timestep, trained with early stopping on
+val MAE (raw units). All runs on an NVIDIA A30 GPU on Swan, clean `.err`
+logs (no warnings).
+
+**First, a single manually-chosen config** (hidden_dim=128, 1 layer,
+lr=1e-3) was trained as an initial check (stopped at epoch 29, best val
+MAE=5.138). **This was later superseded by a proper 18-config
+hyperparameter sweep** (`src/sweep_cnn_lstm.py`) — the manual run is kept
+below only as a documented comparison point, not the final result.
+
+### Hyperparameter sweep (the actual Step 6 result)
+
+Grid: `hidden_dim ∈ {64,128,256} × lr ∈ {1e-3,3e-4} × num_layers ∈ {1,2}`,
+with `dropout ∈ {0.0,0.2}` swept only for `num_layers=2` (dropout is a
+no-op on a 1-layer `nn.LSTM`) — 18 configs total, targeting overfitting
+risk from deeper models given only 517 training plants.
+
+**Model-selection discipline:** every config is compared by **validation
+MAE only**; test is evaluated **exactly once**, for the single config with
+the best val MAE, after the full grid finishes (verified in the run log:
+`grep -c "TEST EVALUATION"` = 1, not 18). This mirrors the same principle
+already used for the ridge alpha sweep in Step 5's baseline — the test
+split is never used for model selection, only for final reporting.
 
 ```bash
-python src/train_cnn_lstm.py \
+python src/sweep_cnn_lstm.py \
     --pairs-split data/pairs_split.parquet \
     --embeddings-dir data/embeddings \
     --norm-stats data/norm_stats.json \
     --baseline-results outputs/step5_baseline_results.json \
     --out-dir outputs \
     --checkpoint-dir checkpoints \
-    --device cuda --hidden-dim 128 --num-layers 1 \
-    --batch-size 64 --lr 1e-3 --max-epochs 200 --patience 15 --seed 42
+    --device cuda --batch-size 64 --max-epochs 200 --patience 15 --seed 42
 ```
 
-**Full test set** (CNN-LSTM's own eligible N, per method): N=1,060 pairs /
-110 plants, MAE=5.420, RMSE=8.428.
+**Winning config: `h256_lr0.001_L2_d0.2`** (hidden_dim=256, lr=1e-3,
+2 layers, dropout=0.2), val MAE=5.007 — full 18-config table in
+`outputs/step6_sweep_results.csv`.
+
+The full grid spans val MAE **5.007–5.448**, under 9% spread top-to-bottom
+— a fairly flat hyperparameter landscape. The original manual config
+(val MAE=5.138) landed 4th of 18, meaning the manual choice was already
+reasonable; the sweep found a modest, not dramatic, improvement.
 
 **Shared-evaluation-set comparison** (same convention as Step 5 — all
-three methods restricted to the 1,057 test pairs every one of them can
-predict):
+methods restricted to the 1,057 test pairs every one of them can predict):
 
 | Method | MAE | RMSE |
 |---|---|---|
 | Persistence | 9.068 | 10.914 |
 | Single-frame | 5.914 | 8.657 |
-| **CNN-LSTM** | **5.373** | **8.350** |
+| CNN-LSTM (manual config) | 5.373 | 8.350 |
+| **CNN-LSTM (sweep winner)** | **5.134** | **8.055** |
 
-CNN-LSTM improves MAE by **9.2%** and RMSE by **3.6%** over single-frame,
-and by **40.7%** MAE over persistence — temporal modeling adds real value
-on top of the single-image visual signal.
+Sweep winner improves MAE by **13.2%** and RMSE by **7.0%** over
+single-frame, and **43.4%** MAE over persistence.
 
-**Size-quartile bias hypothesis (from Step 5) — confirmed:**
-correlation(true diameter, residual) improved from **-0.355**
-(single-frame) to **-0.265** (CNN-LSTM). The LSTM's access to a plant's
-full growth trajectory measurably reduces (but does not eliminate) the
-regression-to-the-mean bias: bottom-quartile MAE improved most
-(4.74→3.74), though a top-quartile (large-plant) under-prediction bias
-persists (mean residual -4.09, down from -5.66).
+**Size-quartile bias — a consistent trend across three modeling stages:**
+correlation(true diameter, residual) improved monotonically:
+**-0.355** (single-frame) → **-0.265** (manual CNN-LSTM) →
+**-0.215** (sweep-tuned CNN-LSTM). Architecture capacity and light
+regularization measurably chip away at the regression-to-the-mean bias
+at each stage, though it is not eliminated (top-quartile mean residual
+is still -2.95mm for the tuned model, down from -5.66mm for single-frame).
 
-**Growth curve plots** for 6 test plants saved to
-`outputs/step6_growth_curve_<plant_id>.png`. Spot-checked two: one
-(`2020_Ref_Plot1_A10`) tracks the actual curve closely; another
-(`2020_Ref_Plot1_A93`) shows the model over-predicting and missing a
-late-season plateau/slight decline in the real measurements (54→48→44mm)
-— a concrete, visible instance of the persistent positive bias, kept here
-rather than cherry-picked out, since it's useful signal for the
-limitations section.
+### Structural limitation: late-season non-monotonic segments
+
+A spot-check of growth-curve plots (`outputs/step6_growth_curve_<plant_id>.png`,
+6 test plants) found one case (`2020_Ref_Plot1_A93`) where the model
+over-predicted through a real late-season plateau/decline in the actual
+measurements (54→48→44mm). A full quantitative follow-up
+(`src/analyze_monotonicity.py`) confirmed this is a systematic pattern,
+not a one-off:
+
+- **Threshold used (exact, no noise band):** a pair is "flat-or-decline"
+  when `target_diameter <= y_t` (delta ≤ 0mm, where y_t is the diameter at
+  the pair's own last input date); "strictly declining" is `target_diameter
+  < y_t`.
+- **17.0%** of test pairs (180/1,057) are flat-or-decline; **79.1%** of
+  test plants (87/110) have at least one such segment.
+- **Magnitude — mostly real, not measurement jitter:** only 12.8% of
+  flat-or-decline pairs are exact ties and 25.6% fall in a jitter-plausible
+  (-2, 0)mm band; **47.8% are ≥5mm declines** (median delta -4mm, mean
+  -6.5mm, min -44mm).
+- **Strongly concentrated late-season, not scattered evenly** — this was
+  checked explicitly since the two explanations imply very different
+  limitations. Using each pair's normalized position within its own
+  plant's trajectory (0=earliest measurement, 1=latest): flat-or-decline
+  segments have median position **0.81** vs **0.41** for growth segments.
+  By season quartile, only 2.5–10% of early/mid-season pairs are
+  flat-or-decline vs **41.3%** in the last quartile. Across the full
+  738-plant population (not just test), **83.8%** of all declines fall in
+  the late half of a plant's own trajectory.
+- **CNN-LSTM error concentrates specifically on these segments:** MAE is
+  4.243 on growth segments vs **9.477** on flat-or-decline segments
+  (**2.23x worse**), and 10.372 on strictly-declining segments. Overall
+  test MAE also rises steadily by season quartile (2.61→4.26→5.93→7.62),
+  so late season is harder in general, but declines within it are
+  disproportionately harder still.
+
+**Honest framing for limitations:** this is a real, late-season biological
+transition (consistent with senescence, head-formation dynamics, or
+harvest-related handling affecting the visible canopy) that the model saw
+comparatively little training signal for — not generic measurement noise
+scattered through the season. The model is trained predominantly on
+monotonic growth segments (83% of pairs) and measurably underperforms on
+the non-monotonic, late-season minority.
 
 ## Status
 
