@@ -18,11 +18,21 @@ plants.
     model. Fit on train split, evaluated on val (for the ridge alpha) and
     test.
 
-Both baselines report MAE/RMSE on test, over ONLY the sample set each one
-can actually produce a prediction for, with N stated for each -- per spec,
-persistence's usable N may be smaller than the single-frame baseline's,
-since persistence additionally requires a valid label at the input's last
-date rather than just an image.
+Every pair has a stable identifier `pair_id = (plant_id, target_day)`
+(unique because a plant has at most one measurement per day). This id is
+used to align samples ACROSS baselines and, later, across Step 6's
+CNN-LSTM, since each method can have a slightly different eligible-sample
+set (persistence needs a valid y_t; single-frame needs a cached last-frame
+embedding, which in practice is always available; the LSTM will need the
+full embedding sequence). The convention going forward:
+  - Always report each method's own full-N metrics (honest per-method
+    result, what a real deployment would see).
+  - ALSO report a "shared eval set" comparison: metrics recomputed for
+    every reported method restricted to the INTERSECTION of pair_ids all
+    of them can produce a prediction for, so head-to-head deltas (e.g.
+    "N% better MAE") are never comparing two different sample sets.
+  - Per-pair predictions/residuals are dumped to CSV for later inspection
+    (e.g. worst-miss analysis), keyed by pair_id and split.
 
 Usage:
     python src/baselines.py \
@@ -47,6 +57,10 @@ def mae_rmse(y_true, y_pred):
     mae = mean_absolute_error(y_true, y_pred)
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     return mae, rmse
+
+
+def make_pair_id(df):
+    return df["plant_id"].astype(str) + "::" + df["target_day"].astype(str)
 
 
 def build_persistence_frame(pairs_df, meta_df):
@@ -114,6 +128,9 @@ def main():
     args = ap.parse_args()
 
     pairs_df = pd.read_parquet(args.pairs_split)
+    pairs_df["pair_id"] = make_pair_id(pairs_df)
+    assert pairs_df["pair_id"].is_unique, "pair_id is not unique -- a plant has >1 row for the same target_day!"
+
     meta_df = pd.read_parquet(args.metadata)
 
     with open(args.norm_stats) as f:
@@ -122,6 +139,7 @@ def main():
     target_std = norm_stats["target_diameter_std"]
 
     results = {}
+    test_preds = {}  # method -> DataFrame(pair_id, y_true, y_pred) for TEST split only
 
     # ============================================================
     # (a) Persistence baseline
@@ -147,6 +165,11 @@ def main():
         print(f"  {split}: N={n} pairs ({n_p} plants), MAE={mae:.3f}, RMSE={rmse:.3f}")
         if split == "test":
             results["persistence"] = {"n_pairs": n, "n_plants": n_p, "mae": mae, "rmse": rmse}
+            test_preds["persistence"] = pd.DataFrame({
+                "pair_id": split_df["pair_id"].values,
+                "y_true": split_df["target_diameter"].values,
+                "y_pred": split_df["y_t"].values,
+            })
 
     # ============================================================
     # (b) Single-frame baseline (ridge regression on last-frame embedding)
@@ -205,12 +228,73 @@ def main():
         "n_pairs": len(test_sf), "n_plants": n_test_plants,
         "mae": test_mae, "rmse": test_rmse, "selected_alpha": best_alpha,
     }
+    test_preds["single_frame"] = pd.DataFrame({
+        "pair_id": test_sf["pair_id"].values,
+        "y_true": y_test_raw,
+        "y_pred": test_pred_raw,
+    })
 
+    # ============================================================
+    # Shared evaluation set: intersection of test pair_ids that EVERY
+    # reported method can produce a prediction for. Metrics recomputed
+    # here are the ones that should be used for head-to-head comparisons
+    # between methods -- the per-method numbers above remain each
+    # method's own honest full-N result, but are not directly comparable
+    # to each other since their eligible sample sets differ.
+    # ============================================================
+    print("\n" + "=" * 60)
+    print("SHARED EVALUATION SET (intersection of all methods' test pair_ids)")
+    print("=" * 60)
+
+    shared_ids = None
+    for method, df in test_preds.items():
+        ids = set(df["pair_id"])
+        shared_ids = ids if shared_ids is None else (shared_ids & ids)
+
+    n_shared = len(shared_ids)
+    n_persistence_only = len(set(test_preds["persistence"]["pair_id"]) - shared_ids)
+    n_single_frame_only = len(set(test_preds["single_frame"]["pair_id"]) - shared_ids)
+    print(f"Shared test pairs (all methods can predict): {n_shared}")
+    print(f"  Dropped from persistence's own set (had y_t, but excluded from shared set for another reason): "
+          f"{n_persistence_only}")
+    print(f"  Dropped from single-frame's own set: {n_single_frame_only}")
+
+    shared_results = {}
+    for method, df in test_preds.items():
+        shared_df = df[df["pair_id"].isin(shared_ids)]
+        mae, rmse = mae_rmse(shared_df["y_true"], shared_df["y_pred"])
+        print(f"  {method}: N={len(shared_df)}, MAE={mae:.3f}, RMSE={rmse:.3f}")
+        shared_results[method] = {"n_pairs": len(shared_df), "mae": mae, "rmse": rmse}
+
+    mae_improvement = 100 * (1 - shared_results["single_frame"]["mae"] / shared_results["persistence"]["mae"])
+    rmse_improvement = 100 * (1 - shared_results["single_frame"]["rmse"] / shared_results["persistence"]["rmse"])
+    print(f"\nOn the SAME {n_shared} test pairs: single-frame improves MAE by {mae_improvement:.1f}% "
+          f"and RMSE by {rmse_improvement:.1f}% over persistence.")
+
+    results["shared_eval_set"] = {
+        "n_pairs": n_shared,
+        "methods": shared_results,
+        "single_frame_vs_persistence_mae_improvement_pct": mae_improvement,
+        "single_frame_vs_persistence_rmse_improvement_pct": rmse_improvement,
+    }
+
+    # ============================================================
+    # Persist per-pair predictions for residual/worst-miss analysis
+    # ============================================================
     os.makedirs(args.out_dir, exist_ok=True)
+    for method, df in test_preds.items():
+        df = df.copy()
+        df["residual"] = df["y_pred"] - df["y_true"]
+        df["abs_error"] = df["residual"].abs()
+        df.sort_values("abs_error", ascending=False).to_csv(
+            os.path.join(args.out_dir, f"step5_{method}_test_predictions.csv"), index=False
+        )
+
     out_path = os.path.join(args.out_dir, "step5_baseline_results.json")
     with open(out_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"\nWrote results to {out_path}")
+    print(f"Wrote per-pair predictions to {args.out_dir}/step5_<method>_test_predictions.csv")
 
 
 if __name__ == "__main__":
