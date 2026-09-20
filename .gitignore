@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.env
+venv/
+.venv/
+*.slurm.out
+*_*.out
+*_*.err
+
+# Data and large artifacts (regenerate via scripts, don't commit)
+data/*
+!data/.gitkeep
+outputs/*
+!outputs/.gitkeep
+checkpoints/*
+!checkpoints/.gitkeep
+
+# HF cache if ever pointed locally
+.cache/

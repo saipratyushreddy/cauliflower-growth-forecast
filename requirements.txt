@@ -1,0 +1,9 @@
+torch
+torchvision
+datasets
+fiftyone
+pandas
+numpy
+scikit-learn
+matplotlib
+pyarrow
