@@ -144,9 +144,36 @@ shard — see conversation history / commit log for the smoke-test procedure.
 - Input sequence length across all 7,031 pairs: min 1, median 5, max 14
   frames.
 
+## Results (Step 5 — baselines)
+
+Evaluated on held-out test plants (110 plants, plant-wise split, seed=42).
+N differs slightly between baselines because persistence additionally
+requires the last input date to itself have a valid label, a stricter
+filter than single-frame's (which only needs the last input image to
+exist).
+
+| Baseline | Test N (pairs / plants) | MAE | RMSE |
+|---|---|---|---|
+| Persistence (ŷ_{t+1} = y_t) | 1,057 / 110 | 9.068 | 10.914 |
+| Single-frame (ridge on frozen ResNet18 embedding, α=100, selected on val) | 1,060 / 110 | 5.962 | 8.736 |
+
+Single-frame clearly beats persistence (~34% lower MAE), giving a
+meaningful bar for the CNN-LSTM (Step 6) to clear: it must outperform not
+just "assume no change" but also a purely non-temporal visual regressor
+before temporal modeling can be said to add value.
+
+```bash
+python src/baselines.py \
+    --pairs-split data/pairs_split.parquet \
+    --metadata data/metadata.parquet \
+    --embeddings-dir data/embeddings \
+    --norm-stats data/norm_stats.json \
+    --out-dir outputs
+```
+
 ## Status
 
-Steps 1–4 complete and verified on Swan:
+Steps 1–5 complete and verified on Swan:
 - All pipeline artifacts (`data/metadata.parquet`, `data/pairs.parquet`,
   `data/pairs_split.parquet`, `data/norm_stats.json`) regenerated on Swan
   and confirmed to exactly match local runs (9,377 reference rows / 739
@@ -155,7 +182,10 @@ Steps 1–4 complete and verified on Swan:
   9,377/9,377 images downloaded (0 failures) and embedded (0 failures),
   739/739 plants have a shard file, index verified structurally correct.
 
-**Not yet run:** Step 5 (persistence + single-frame baselines), Step 6
-(CNN-LSTM), Step 7 (final SLURM job + results in this README). Do not
-start the Transformer model, multi-trait regression, or missing-data
-robustness experiments — out of scope for this phase.
+- Step 5 baselines run on Swan (CPU, login node — no GPU needed for ridge
+  regression on 512-dim vectors); results above.
+
+**Not yet run:** Step 6 (CNN-LSTM), Step 7 (final SLURM job + results in
+this README, if not already folded in above). Do not start the
+Transformer model, multi-trait regression, or missing-data robustness
+experiments — out of scope for this phase.
