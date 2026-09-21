@@ -430,7 +430,20 @@ architecture-limited one, which would predict exactly this kind of
 result for a higher-capacity model.
 
 Growth curve plots for the Transformer's winning config:
-`outputs/step_p2_transformer_growth_curve_<plant_id>.png`.
+`outputs/step_p2_transformer_growth_curve_<plant_id>.png` (6 test
+plants, same set as the Phase 1 CNN-LSTM plots, for direct comparison).
+
+Spot-checking the same plant used for the Phase 1 CNN-LSTM comparison
+(`2020_Ref_Plot1_A93`) makes the Transformer's weakness concrete: on the
+final measurement (day 93), the actual diameter **drops** to 44mm (from
+48mm at day 91), but the Transformer predicts a sharp **jump to ~92mm** —
+a dramatically larger miss than the CNN-LSTM's own error on this same
+plant's same late-season segment. This is a direct visual instance of why
+the Transformer loses to the CNN-LSTM in aggregate: it appears to
+struggle more, not less, on exactly the late-season non-monotonic
+segments already identified as the model family's shared weak point.
+
+![CNN-Transformer growth curve: late-season miss, same plant as the CNN-LSTM comparison](outputs/step_p2_transformer_growth_curve_2020_Ref_Plot1_A93.png)
 
 ## Phase 2 — remaining work
 
