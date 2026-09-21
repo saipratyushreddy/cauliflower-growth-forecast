@@ -204,6 +204,17 @@ same val-only model-selection discipline, plus a 4-way shared-eval-set
 comparison against all three Phase 1 methods. See
 [Phase 2 results](#phase-2-results--cnn-transformer) below.
 
+### Follow-up — positional encoding d_model sensitivity check
+```bash
+sbatch scripts/check_pe_dmodel_sensitivity.slurm
+```
+Narrow, hypothesis-driven check (not a full re-sweep): retrains
+`d_model ∈ {64,128,256,512}` with other hyperparameters fixed near the
+sweep winner's, to test whether the aliasing symptom found in the
+positional encoding sanity check is actually causing the Transformer's
+underperformance vs. the CNN-LSTM. Same val-only selection, single test
+evaluation. See [Phase 2 results](#phase-2-results--cnn-transformer).
+
 ## Data characteristics worth carrying into limitations
 
 - Reference-task population is **739 plants**, not ~14,000 (that figure
@@ -417,17 +428,52 @@ RMSE** (more error, not less). The size-quartile bias correlation
 sweep-tuned) rather than continuing that trend's improvement — it
 interrupts, rather than extends, the Phase 1 bias-reduction pattern.
 
-This is reported as a genuine result, not downplayed: a plausible
-explanation is that with only 517 training plants and short sequences
-(1–14 frames), the Transformer's larger parameter space and weaker
-sequential inductive bias (versus the LSTM's recurrence, which enforces
-processing order structurally) may need more data than is available here
-to outperform an architecture that already assumes temporal order. This
-is consistent with Phase 1's own finding that the CNN-LSTM's
-hyperparameter landscape was fairly flat (5.007–5.448 val MAE across 18
-configs) — suggestive of a data-limited regime rather than an
-architecture-limited one, which would predict exactly this kind of
-result for a higher-capacity model.
+This is reported as a genuine result, not downplayed.
+
+**Before concluding the architecture itself underperforms, two
+alternative explanations were explicitly tested and ruled out, rather
+than assumed away:**
+
+1. **Was this an unfair comparison (untuned Transformer vs. tuned
+   LSTM)?** No — both are hyperparameter-sweep winners under the
+   identical val-only selection discipline (24 configs vs. 18 configs),
+   with test touched exactly once for each (verified:
+   `grep -c "TEST EVALUATION"` = 1 for both sweep logs).
+2. **Is the continuous positional encoding broken or aliased at the
+   winning config's small `d_model=64`?** This was checked directly, not
+   assumed. A cosine-similarity sanity check on real
+   `day_after_planting` values (15, 22, 42, 83, 91) confirmed the
+   encoding correctly orders gap sizes (2-day gap similarity 0.884 >
+   7-day 0.727 > 14-day 0.631 > 42-day 0.559 — larger gaps are
+   correctly less similar) — **but also found a genuine aliasing
+   symptom**: `day=91` was more cosine-similar to the distant `day=15`
+   (0.582) than to the much closer `day=22` (0.450), consistent with
+   sinusoidal PE's known periodicity behavior when `d_model` is small
+   relative to the position range (here, days up to ~93 encoded in only
+   64 dimensions). This was a real, plausible concern, not a strawman —
+   so it was tested directly: a follow-up grid retrained `d_model ∈
+   {64,128,256,512}` (other hyperparameters fixed near the original
+   winner) using the same val-only selection and single test evaluation.
+   **Result: larger `d_model` made validation performance monotonically
+   *worse*** (val MAE 5.097→5.217→5.231→5.282 as `d_model` rises from 64
+   to 512), the opposite of what the aliasing-is-the-bottleneck
+   hypothesis predicts (a larger `d_model` reduces aliasing by spreading
+   the same position range across more frequency dimensions). This
+   pattern — larger capacity hurting, not helping — is the standard
+   signature of overparameterization on a small dataset, not an
+   encoding-quality problem. **The aliasing symptom is real but was
+   directly ruled out as the cause of the Transformer's underperformance.**
+
+With that alternative explanation tested and excluded, the standing
+explanation is now evidenced rather than speculative: with only 517
+training plants and short sequences (1–14 frames), the Transformer's
+larger parameter space and weaker sequential inductive bias (versus the
+LSTM's recurrence, which enforces processing order structurally) needs
+more data than is available here to outperform an architecture that
+already assumes temporal order — consistent with Phase 1's own finding
+that the CNN-LSTM's hyperparameter landscape was already fairly flat
+(5.007–5.448 val MAE across 18 configs), suggestive of a data-limited
+regime.
 
 Growth curve plots for the Transformer's winning config:
 `outputs/step_p2_transformer_growth_curve_<plant_id>.png` (6 test
