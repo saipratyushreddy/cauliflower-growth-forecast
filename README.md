@@ -1,15 +1,16 @@
-# Cauliflower Growth Forecasting (GrowliFlower CNN-LSTM Baseline)
+# Cauliflower Growth Forecasting (GrowliFlower)
 
-**Phase 1 of a two-phase project.** The full project goal, as scoped by
-the course/research prompt, is to compare **three** approaches for
-forecasting cauliflower growth traits from UAV image time series:
-(1) simple baselines, (2) a CNN-LSTM, and (3) a CNN-Transformer. This
-repository implements and rigorously evaluates the first two — baselines
-and CNN-LSTM — against real data on UNL's Swan HPC cluster. **The
-CNN-Transformer, multi-trait regression, and a missing-observation
-robustness test are Phase 2, deliberately not started here** (see
-[Phase 2 — planned, not started](#phase-2--planned-not-started) below).
-This is a checkpoint, not the finished project.
+The project goal, as scoped by the course/research prompt, is to compare
+**three** approaches for forecasting cauliflower growth traits from UAV
+image time series: (1) simple baselines, (2) a CNN-LSTM, and (3) a
+CNN-Transformer, against real data on UNL's Swan HPC cluster.
+
+**Phase 1** (baselines + CNN-LSTM) is complete, sweep-tuned, and
+rigorously evaluated. **Phase 2** is in progress: the CNN-Transformer has
+been implemented and its own hyperparameter sweep run (see
+[Phase 2 results](#phase-2-results--cnn-transformer) below); multi-trait
+regression and a missing-observation robustness test are still planned,
+not started (see [Phase 2 — remaining work](#phase-2--remaining-work)).
 
 ## Dataset
 
@@ -194,6 +195,15 @@ python src/analyze_monotonicity.py \
 Quantifies the late-season non-monotonic structural limitation described
 below.
 
+### Phase 2, part 1 — CNN-Transformer (hyperparameter sweep)
+```bash
+sbatch scripts/sweep_cnn_transformer.slurm
+```
+Same architecture-swap approach as Step 6 (reuses the cached embeddings),
+same val-only model-selection discipline, plus a 4-way shared-eval-set
+comparison against all three Phase 1 methods. See
+[Phase 2 results](#phase-2-results--cnn-transformer) below.
+
 ## Data characteristics worth carrying into limitations
 
 - Reference-task population is **739 plants**, not ~14,000 (that figure
@@ -361,28 +371,81 @@ explicitly, deliberately including the unflattering one:
 - **Dataset license unresolved** (see Dataset section above) — confirm
   with the corresponding author before any wider sharing or publication.
 
-## Phase 2 — planned, not started
+## Phase 2 results — CNN-Transformer
 
-Explicitly out of scope for this checkpoint; not begun in this
-repository:
+Encoder-only Transformer over the same cached ResNet18 embeddings as the
+CNN-LSTM, using a **continuous sinusoidal positional encoding keyed on
+each timestep's real `day_after_planting` value** (raw days, not
+normalized) in place of integer sequence position — directly encoding
+the irregular 2–42 day acquisition gaps documented above, parameter-free,
+and generalizes to gap lengths not seen in training (see
+`src/cnn_transformer_model.py` for the exact formula). Causal + padding
+masking ensures no future timestep or padded position is attended to.
 
-1. **CNN-Transformer** model (in place of, or alongside, the CNN-LSTM),
-   using a **continuous positional encoding** (e.g. keyed on
-   day-after-planting rather than sequence index) to reflect the
-   irregular acquisition cadence documented above, evaluated with the
-   same shared-evaluation-set convention against the Step 5/6 results.
-2. **Multi-trait regression** — extending beyond plant diameter to
+**24-config hyperparameter sweep** (`d_model ∈ {64,128} × nhead ∈ {4,8}
+× num_layers ∈ {1,2} × lr ∈ {1e-3,3e-4}`, dropout ∈ {0.0,0.2} for
+`num_layers=2` only), same model-selection discipline as the CNN-LSTM
+sweep: every config compared by **validation MAE only**, test evaluated
+**exactly once** for the winning config (verified: `grep -c "TEST
+EVALUATION"` = 1). Ran on an NVIDIA A30 GPU on Swan, 1h07m total, clean
+`.err` log.
+
+```bash
+sbatch scripts/sweep_cnn_transformer.slurm
+```
+
+**Winning config: `d64_h4_lr0.0003_L2_do0.2`** (d_model=64, 4 heads,
+2 layers, lr=3e-4, dropout=0.2), val MAE=5.097 — full 24-config table in
+`outputs/step_p2_transformer_sweep_results.csv`.
+
+**4-way shared-evaluation-set comparison** (1,057 test pairs every method
+can predict):
+
+| Method | MAE | RMSE |
+|---|---|---|
+| Persistence | 9.068 | 10.914 |
+| Single-frame | 5.914 | 8.657 |
+| **CNN-Transformer (sweep winner)** | **5.528** | **8.668** |
+| **CNN-LSTM (Phase 1 sweep winner)** | **5.134** | **8.055** |
+
+**Honest result: the Transformer beats single-frame but loses to the
+CNN-LSTM.** It improves MAE by ~6.5% over single-frame, but its RMSE
+(8.668) is essentially tied with single-frame's (8.657) — no real gain
+there. Against the CNN-LSTM, it is clearly worse: **+7.7% MAE, +7.6%
+RMSE** (more error, not less). The size-quartile bias correlation
+(-0.229) falls between the two CNN-LSTM results (-0.265 manual, -0.215
+sweep-tuned) rather than continuing that trend's improvement — it
+interrupts, rather than extends, the Phase 1 bias-reduction pattern.
+
+This is reported as a genuine result, not downplayed: a plausible
+explanation is that with only 517 training plants and short sequences
+(1–14 frames), the Transformer's larger parameter space and weaker
+sequential inductive bias (versus the LSTM's recurrence, which enforces
+processing order structurally) may need more data than is available here
+to outperform an architecture that already assumes temporal order. This
+is consistent with Phase 1's own finding that the CNN-LSTM's
+hyperparameter landscape was fairly flat (5.007–5.448 val MAE across 18
+configs) — suggestive of a data-limited regime rather than an
+architecture-limited one, which would predict exactly this kind of
+result for a higher-capacity model.
+
+Growth curve plots for the Transformer's winning config:
+`outputs/step_p2_transformer_growth_curve_<plant_id>.png`.
+
+## Phase 2 — remaining work
+
+1. **Multi-trait regression** — extending beyond plant diameter to
    height, head diameter, and/or BBCH developmental stage, jointly or
    per-trait.
-3. **Missing-observation robustness test** — evaluating how gracefully
-   each model degrades as input frames are synthetically dropped, given
-   the real-world irregularity already characterized above (6–15 dates
-   per plant, ~83% trait coverage per acquisition date).
+2. **Missing-observation robustness test** — evaluating how gracefully
+   each model (CNN-LSTM and CNN-Transformer) degrades as input frames are
+   synthetically dropped, given the real-world irregularity already
+   characterized above (6–15 dates per plant, ~83% trait coverage per
+   acquisition date).
 
 ## Status
 
-Steps 1–6 (baselines + CNN-LSTM, Phase 1 in full) complete and verified
-on Swan:
+**Phase 1 (baselines + CNN-LSTM) complete and verified on Swan:**
 - All pipeline artifacts (`data/metadata.parquet`, `data/pairs.parquet`,
   `data/pairs_split.parquet`, `data/norm_stats.json`) regenerated on Swan
   and confirmed to exactly match local runs (9,377 reference rows / 739
@@ -396,7 +459,12 @@ on Swan:
   evaluated on Swan (NVIDIA A30 GPU), with the shared-eval-set comparison
   against Step 5 and the quantified late-season structural limitation.
 
-**This is the end of Phase 1.** Do not start the CNN-Transformer,
-multi-trait regression, or missing-observation robustness experiments
-without explicit approval — see [Phase 2](#phase-2--planned-not-started)
-above for what's next.
+**Phase 2, part 1 (CNN-Transformer) complete:** 24-config sweep run on
+Swan (NVIDIA A30 GPU, 1h07m, clean exit), same val-only model-selection
+discipline as Phase 1, 4-way shared-eval-set comparison against all three
+Phase 1 methods. Result: beats single-frame on MAE only (not RMSE), loses
+to the CNN-LSTM on both metrics — reported honestly above, not as a win.
+
+**Remaining:** multi-trait regression, missing-observation robustness
+test (see [Phase 2 — remaining work](#phase-2--remaining-work) above).
+Repository is public: https://github.com/saipratyushreddy/cauliflower-growth-forecast
