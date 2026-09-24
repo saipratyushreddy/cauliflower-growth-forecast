@@ -7,10 +7,13 @@ CNN-Transformer, against real data on UNL's Swan HPC cluster.
 
 **Phase 1** (baselines + CNN-LSTM) is complete, sweep-tuned, and
 rigorously evaluated. **Phase 2** is in progress: the CNN-Transformer has
-been implemented and its own hyperparameter sweep run (see
-[Phase 2 results](#phase-2-results--cnn-transformer) below); multi-trait
-regression and a missing-observation robustness test are still planned,
-not started (see [Phase 2 — remaining work](#phase-2--remaining-work)).
+been implemented, swept, and compared (see
+[Phase 2 results](#phase-2-results--cnn-transformer) below), and a
+missing-observation robustness test comparing both frozen models has
+also been completed (see
+[Phase 2 results — missing-observation robustness](#phase-2-results--missing-observation-robustness)).
+Multi-trait regression is still planned, not started (see
+[Phase 2 — remaining work](#phase-2--remaining-work)).
 
 ## Dataset
 
@@ -214,6 +217,19 @@ sweep winner's, to test whether the aliasing symptom found in the
 positional encoding sanity check is actually causing the Transformer's
 underperformance vs. the CNN-LSTM. Same val-only selection, single test
 evaluation. See [Phase 2 results](#phase-2-results--cnn-transformer).
+
+### Phase 2, part 2 — missing-observation robustness test
+```bash
+sbatch scripts/robustness_missing_obs.slurm
+```
+Inference-only (frozen checkpoints, no retraining). Two follow-up
+analysis scripts, run after the main job:
+```bash
+python src/analyze_robustness_results.py \
+    --per-pair-csv outputs/step_p2_robustness_per_pair.csv --pairs-split data/pairs_split.parquet
+python src/dig_into_n_kept_2.py --per-pair-csv outputs/step_p2_robustness_per_pair.csv
+```
+See [Phase 2 results — missing-observation robustness](#phase-2-results--missing-observation-robustness).
 
 ## Data characteristics worth carrying into limitations
 
@@ -491,16 +507,99 @@ segments already identified as the model family's shared weak point.
 
 ![CNN-Transformer growth curve: late-season miss, same plant as the CNN-LSTM comparison](outputs/step_p2_transformer_growth_curve_2020_Ref_Plot1_A93.png)
 
+## Phase 2 results — missing-observation robustness
+
+**Inference-time evaluation only — no retraining, no hyperparameter
+changes.** Loads the two already-trained, frozen sweep-winner checkpoints
+(CNN-LSTM: `h256_lr0.001_L2_d0.2`; CNN-Transformer:
+`d64_h4_lr0.0003_L2_do0.2`) exactly as saved. For each of the 1,057
+shared-eval-set test pairs, at drop levels {0%, 25%, 50%, 75%} of that
+pair's available input observations, a random subset is removed
+(chronological order preserved among what remains, never dropping below
+1 observation), and both models run inference on the **identical**
+dropped-observation set per trial — the drop mask is computed once per
+`(pair, drop_frac, seed)` and reused for both models' own input
+representations, verified directly in the code (`src/robustness_missing_obs.py`),
+not just by design intent. 5 random seeds per non-zero drop level.
+
+```bash
+sbatch scripts/robustness_missing_obs.slurm
+```
+
+**Aggregate table** (mean ± std MAE/RMSE over 5 seeds; 0% is
+deterministic):
+
+| Drop level | LSTM MAE | LSTM RMSE | Transformer MAE | Transformer RMSE |
+|---|---|---|---|---|
+| 0% | 5.184 ± 0.000 | 8.146 ± 0.000 | 5.587 ± 0.000 | 8.775 ± 0.000 |
+| 25% | 7.023 ± 0.105 | 9.842 ± 0.162 | 6.677 ± 0.121 | 9.750 ± 0.155 |
+| 50% | 11.447 ± 0.121 | 14.797 ± 0.204 | 9.288 ± 0.166 | 12.643 ± 0.166 |
+| 75% | 18.978 ± 0.264 | 24.382 ± 0.434 | 13.841 ± 0.238 | 19.037 ± 0.351 |
+
+At 0% drop the LSTM has lower error (matches the full-eval Phase 2
+result above). At every non-zero drop level, the ranking flips: the
+Transformer has lower MAE and RMSE, and the gap widens as more
+observations are dropped.
+
+**Before accepting this as "attention-based temporal modeling is more
+robust to missing observations" in the general sense, three follow-up
+checks were run** — the aggregate table alone doesn't distinguish a real
+general effect from an artifact of a few plants or a length-specific
+quirk:
+
+1. **Fairness (same dropped set hits both models)**: confirmed by direct
+   code inspection — `keep_idx` is computed once per trial and reused for
+   both `predict_lstm()` and `predict_transformer()`; no independent
+   second RNG draw exists in the loop.
+2. **Broad or concentrated across plants?** Broad. At 50% drop, 94/110
+   test plants (85.5%) favor the Transformer, and the top 5 plants
+   account for only 11.1% of the total advantage; at 75% drop, 99/110
+   (90.0%) favor the Transformer, top 5 = 8.5% of total. Notably, the
+   plants where the LSTM does relatively *better* include the same three
+   plants flagged earlier for outsized error (`2021_Ref_Plot2_A1`,
+   `2021_Ref_Plot2_E18`, `2020_Ref_Plot3_A95` — see Limitations, the
+   traced cleaning-rule artifact and documented "grass-overgrowth"
+   measurement gap).
+3. **Smooth degradation, or a cliff at short lengths?** A cliff — and
+   this changes the correct framing substantially. Bucketing error by
+   REMAINING observation count (`n_kept`, not drop %) shows both models
+   are statistically indistinguishable at `n_kept=1` (median abs error
+   4.92 LSTM vs. 5.53 Transformer — LSTM is marginally *better* here),
+   but the gap opens sharply at `n_kept=2` (median 14.53 vs. 7.34) and
+   stays wide at `n_kept=3` (median 12.68 vs. 6.62), before narrowing
+   again at longer remaining lengths. This is not a mean skewed by a few
+   pathological predictions: at `n_kept=2`, 40.1% of all 3,739 LSTM
+   trials exceed 20mm absolute error, spread across 77 of 110 test
+   plants (median stays close to the mean throughout) — a genuine,
+   broad-based degradation specific to very short remaining sequences,
+   not an outlier artifact.
+
+**Conclusion, stated at the precision the evidence supports:** this is
+**not** general evidence that attention-based temporal modeling is more
+robust to missing observations. It is more specific: **the CNN-LSTM's
+error is roughly 2x larger than the CNN-Transformer's specifically at
+very short remaining-observation counts (2–3 frames)**, broad-based
+across most of the test population rather than a few plants, and
+narrowing at longer remaining lengths. A plausible (not proven)
+explanation is a training/inference length mismatch: Step 6 trained the
+LSTM only on the natural, denser sequences as they occur (median length
+5), with no observation-dropout augmentation, so a synthetically-created
+2–3-frame sequence is a different, thinner-sampled distribution than
+anything the LSTM's recurrence was calibrated on — whereas the
+Transformer's attention mechanism may degrade more gracefully to small
+input sets somewhat independent of *why* they are small. This was not
+directly isolated (would require training an LSTM variant with
+observation-dropout augmentation to test in the "does training on
+shortened sequences fix this" sense, which is out of scope for an
+inference-only robustness test) — it is offered as the most consistent
+explanation for the observed length-specific pattern, not a proven
+mechanism.
+
 ## Phase 2 — remaining work
 
 1. **Multi-trait regression** — extending beyond plant diameter to
    height, head diameter, and/or BBCH developmental stage, jointly or
    per-trait.
-2. **Missing-observation robustness test** — evaluating how gracefully
-   each model (CNN-LSTM and CNN-Transformer) degrades as input frames are
-   synthetically dropped, given the real-world irregularity already
-   characterized above (6–15 dates per plant, ~83% trait coverage per
-   acquisition date).
 
 ## Status
 
@@ -523,7 +622,25 @@ Swan (NVIDIA A30 GPU, 1h07m, clean exit), same val-only model-selection
 discipline as Phase 1, 4-way shared-eval-set comparison against all three
 Phase 1 methods. Result: beats single-frame on MAE only (not RMSE), loses
 to the CNN-LSTM on both metrics — reported honestly above, not as a win.
+A follow-up positional-encoding aliasing symptom was found, tested via a
+targeted d_model sensitivity check, and ruled out as the cause (larger
+d_model made results monotonically worse, the opposite of what the
+aliasing-is-the-bottleneck hypothesis predicts).
 
-**Remaining:** multi-trait regression, missing-observation robustness
-test (see [Phase 2 — remaining work](#phase-2--remaining-work) above).
+**Phase 2, part 2 (missing-observation robustness test) complete:**
+inference-only evaluation of both frozen sweep-winner checkpoints at
+input-drop levels {0%, 25%, 50%, 75%}, 5 seeds each, on the shared
+1,057-pair eval set. Headline aggregate result (Transformer degrades more
+slowly overall) was verified rather than taken at face value: the
+same-dropped-set fairness constraint was confirmed by direct code
+inspection, the effect was confirmed broad-based across ~85-90% of test
+plants (not a few outliers), and bucketing by remaining-observation count
+revealed the true mechanism is a ~2x LSTM-specific error spike
+concentrated at very short remaining lengths (2-3 frames), not a general
+degradation-rate difference — reported at that more precise, narrower
+level rather than the broader claim the aggregate table alone would
+suggest.
+
+**Remaining:** multi-trait regression (see
+[Phase 2 — remaining work](#phase-2--remaining-work) above).
 Repository is public: https://github.com/saipratyushreddy/cauliflower-growth-forecast
