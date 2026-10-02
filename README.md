@@ -645,8 +645,52 @@ comparisons misleading. Because Field1 is resized and Field2 is not, results
 are reported **pooled and per-field as co-equal results** (test is ~80%
 Field2, so the pooled number alone is dominated by it).
 
-**Step B: copy-forward baseline** (prediction = last input image),
-`sbatch scripts/image_copy_forward_baseline.slurm`. Results: _pending run on Swan._
+**Step B: copy-forward baseline** (prediction = last input image), run on
+the filtered pairs (8,404 scored, 0 failures; `sbatch
+scripts/image_copy_forward_baseline.slurm`). Test split, 1,237 pairs, all
+images at 256x256. Pooled and per-field are co-equal results:
+
+| Test subset | Pairs | RGB SSIM mean (median) | RGB PSNR dB mean (median) | Structure SSIM mean (median) |
+|---|---|---|---|---|
+| Pooled | 1,237 | 0.122 (0.072) | 10.03 (9.06) | 0.044 (0.028) |
+| Field1/2020 (downsampled 490->256) | 215 | 0.096 (0.085) | 11.32 (10.53) | 0.018 (0.016) |
+| Field2/2021 (native 256) | 1,022 | 0.128 (0.067) | 9.76 (8.71) | 0.050 (0.032) |
+
+Structure SSIM = luma, local contrast normalization (Gaussian sigma=7,
+eps=0.05, clip +-3), SSIM with data_range=6. Train/val agree with test
+(pooled SSIM 0.120 / 0.123). Field1 vs Field2 differences cannot be
+attributed to the field itself: Field1 is downsampled (smoothing) and the
+metrics disagree on direction (higher PSNR, lower SSIM and structure SSIM).
+
+**Oracle reference, NOT a baseline: `oracle_colormatch`.** USES THE TARGET
+IMAGE'S per-channel mean/std, so it is not achievable at inference and is
+not comparable to the baseline above or to any trained model. It only
+bounds how much copy-forward error is global exposure/colour change.
+Test pooled: SSIM 0.158 (median 0.075), PSNR 12.67 dB (10.28). Field1 PSNR
+14.87, Field2 12.21. Matching colour recovers about +2.6 dB PSNR and +0.036
+SSIM, so global exposure is only part of the error. The very low structure
+SSIM (0.044) says the rest is spatial: canopy/leaf layout change,
+sub-plant misregistration between flights, and real growth.
+
+**Reading these numbers.** (1) SSIM is heavy-tailed: means exceed medians
+(e.g. gap 7-10 days: mean 0.175, median 0.066), driven by a few static,
+dim early-season pairs (best Field2 pair: day 8->16, SSIM 0.70). Report
+medians alongside means. (2) Gap buckets are confounded with growth stage
+and field and SSIM does not fall with gap (means 0.069 / 0.113 / 0.175 /
+0.059 for gaps <=4 / 4-7 / 7-10 / >10 days), so they are not evidence
+about forecast horizon; stratify by growth stage instead.
+
+**Blur scan** (`src/blur_scan.py`, variance of Laplacian on 9,377 images,
+bottom 1% within each field x day group flagged = 88 images / 80 plants;
+flagging is relative by construction, so ~1% is always flagged). The 234
+known black frames have VoL ~0, far below every other image (non-degenerate
+minimum 23.6 Field2, 83 Field1), so no further black/blank frames were
+found. Flagged images cluster by plot x date (e.g. Plot5 2021-08-11, Plot1
+2021-08-30, Plot5 2021-07-01), which suggests flight/plot-level softness
+rather than isolated corrupt files; not yet visually verified. Field1
+day 28 (2020-08-25) has median VoL 160 vs 1,412 on day 22 and 3,038 on day
+36, i.e. the whole flight is soft and/or dark; it touches 478 of 1,404
+Field1 pairs (74 of 215 test).
 
 ## Status
 
