@@ -21,3 +21,5 @@ python -u src/build_image_pairs.py --metadata data/metadata.parquet \
     --out data/image_pairs.parquet
 python -u src/image_copy_forward_baseline.py --image-pairs data/image_pairs.parquet \
     --images-root "$PROJECT_DIR/data/images" --out-dir outputs
+python -u src/summarize_baseline.py --per-pair-csv outputs/img_stepB_copy_forward_per_pair.csv \
+    --image-pairs data/image_pairs.parquet --out outputs/img_stepB_final_protocol.json
