@@ -15,6 +15,9 @@ Differences from the Phase 0 diameter pipeline (build_pairs.py):
     split_data.split_plants (RandomState(seed)) applied to that single plant.
     NOTE: with n=1, round(0.7*1)=1, so that plant deterministically lands in
     train; this is a documented exception, not a random draw.
+  * BLURRY_EXCLUDE (9 images, Plot5 2021-08-11 / Plot1 2021-08-30) are removed as
+    target and last input; elsewhere in a pair's history they are scrubbed.
+    Field1 day 28 (dark but sharp, valid data) is deliberately NOT excluded.
   * --exclude-list drops every pair whose input OR target image is a
     degenerate (black/placeholder) frame. 234 files <10KB were found on Swan
     (232 byte-identical placeholders + 2 near-black frames), all Field1,
@@ -30,6 +33,15 @@ import argparse
 import pandas as pd
 
 from split_data import SEED, split_plants
+
+# Visually confirmed blurry (stitching/focus) frames; see README "Image quality exclusions".
+# (plant_id, acquisition_date). Excluded as target AND as last input. Not bridged: no
+# pair is created across a removed frame. Where such a frame appears only in the
+# older history of a later pair, it is scrubbed from that history and the pair is kept.
+BLURRY_EXCLUDE = (
+    [(f"2021_Ref_Plot5_{p}", "2021-08-11") for p in ["A16", "A17", "A18", "B17"]]
+    + [(f"2021_Ref_Plot1_{p}", "2021-08-30") for p in ["A4", "A5", "A6", "B6", "B7"]]
+)
 
 
 def build_pairs(meta):
@@ -87,16 +99,50 @@ def main():
 
     pairs = build_pairs(meta)
     assert pairs["pair_id"].is_unique
+    pairs["split"] = pairs["plant_id"].map(split_of)
+    assert (pairs.groupby("plant_id")["split"].nunique() == 1).all()
+    base_counts = pairs["split"].value_counts().to_dict()
+    print(f"Unfiltered: {len(pairs)} pairs {base_counts}")
+
+    def report(label, mask):
+        d = pairs[mask]
+        print(f"  {label}: {len(d)} pairs removed -> "
+              f"{ {s: int((d['split'] == s).sum()) for s in ['train', 'val', 'test']} }")
+
     if args.exclude_list:
         bad = set(pd.read_csv(args.exclude_list, sep=r"\s+", header=None, names=["md5", "fp"])["fp"])
         assert bad <= set(meta["filepath"]), "exclude-list has paths not in metadata"
         drop = pairs["target_filepath"].isin(bad) | pairs["input_filepaths"].apply(lambda l: any(f in bad for f in l))
-        print(f"Excluding {drop.sum()} pairs touching {len(bad)} degenerate images "
-              f"({pairs[drop]['plant_id'].nunique()} plants, fields {sorted(pairs[drop]['field'].unique())}):")
-        print(pairs[drop].groupby(["field", "pair_id"]).size().groupby("field").size().to_string())
+        print(f"Black/placeholder frames: {len(bad)} images ({pairs[drop]['plant_id'].nunique()} plants, "
+              f"fields {sorted(pairs[drop]['field'].unique())})")
+        report("black frames", drop)
         pairs = pairs[~drop].reset_index(drop=True)
-    pairs["split"] = pairs["plant_id"].map(split_of)
-    assert (pairs.groupby("plant_id")["split"].nunique() == 1).all()
+
+    blur_rows = meta.merge(pd.DataFrame(BLURRY_EXCLUDE, columns=["plant_id", "acquisition_date"]),
+                           on=["plant_id", "acquisition_date"])
+    assert len(blur_rows) == len(BLURRY_EXCLUDE), "BLURRY_EXCLUDE entry not found in metadata"
+    blur = set(blur_rows["filepath"])
+    drop_t = pairs["target_filepath"].isin(blur)
+    drop_i = pairs["input_last_filepath"].isin(blur)
+    print(f"Blurry frames: {len(blur)} images ({blur_rows['plant_id'].nunique()} plants)")
+    report("blurry as target", drop_t)
+    report("blurry as last input (not already counted as target)", drop_i & ~drop_t)
+    report("blurry total", drop_t | drop_i)
+    # Alternative (not applied): also dropping every pair that merely has one in its history
+    hist = pairs["input_filepaths"].apply(lambda l: any(f in blur for f in l))
+    alt = drop_t | drop_i | hist
+    print(f"  [for reference, NOT applied] dropping pairs with a blurry frame anywhere in history too "
+          f"would remove {int(alt.sum())} pairs: { {s: int((pairs[alt]['split'] == s).sum()) for s in ['train', 'val', 'test']} }")
+    pairs = pairs[~(drop_t | drop_i)].reset_index(drop=True)
+    keep = pairs["input_filepaths"].apply(lambda l: [f not in blur for f in l])
+    n_scrub = int(keep.apply(lambda k: not all(k)).sum())
+    pairs["input_days"] = [[d for d, k in zip(ds, ks) if k] for ds, ks in zip(pairs["input_days"], keep)]
+    pairs["input_filepaths"] = [[f for f, k in zip(fs, ks) if k] for fs, ks in zip(pairs["input_filepaths"], keep)]
+    pairs["n_input_frames"] = pairs["input_filepaths"].apply(len)
+    assert (pairs["n_input_frames"] >= 1).all()
+    print(f"  {n_scrub} retained pairs had a blurry frame scrubbed from their older history")
+    assert not pairs["target_filepath"].isin(blur).any() and not pairs["input_last_filepath"].isin(blur).any()
+    assert pairs["pair_id"].is_unique
 
     print(f"Plants: {len(plant_ids)}  |  pairs: {len(pairs)}")
     for s in ["train", "val", "test"]:
