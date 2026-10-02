@@ -601,6 +601,42 @@ mechanism.
    height, head diameter, and/or BBCH developmental stage, jointly or
    per-trait.
 
+## Image-to-image future growth prediction (primary track)
+
+This track supersedes diameter regression (documented above as Phase 0 and
+left unchanged) as the headline deliverable: given a plant's image history,
+predict its next acquired image.
+
+**Pairs** (`src/build_image_pairs.py` -> `data/image_pairs.parquet`): for a
+plant's k-th image (k>=1) the target is that image and the input is all
+earlier images. Every acquisition counts; no diameter label is required.
+8,638 pairs from all 739 plants.
+
+**Split.** All 738 plants retain their Phase 0 split assignment, preserving
+an identical test set across tasks. The 739th plant (`2021_Ref_Plot2_B13`,
+excluded from Phase 0 for lacking 2+ diameter measurements) is assigned via
+`RandomState(42)` applied to that single plant, which deterministically
+yields train (`round(0.7*1)=1`). Re-running the Phase 0 scheme on the full
+739-plant list was rejected because it reshuffles the entire permutation (125
+plants changed split, 29 Phase 0 train plants became test).
+
+| Split | Plants | Pairs | Field1 pairs | Field2 pairs |
+|---|---|---|---|---|
+| train | 518 | 6,015 | 1,199 | 4,816 |
+| val | 111 | 1,346 | 184 | 1,162 |
+| test | 110 | 1,277 | 255 | 1,022 |
+
+**Resolution: all images are resized to 256x256.** Field1/2020 images
+(natively 490x490) are **downsampled** (Lanczos); Field2/2021 images are
+natively 256x256 and untouched. Upsampling Field2 instead would mean
+generating detail that never existed in the source, making SSIM/PSNR
+comparisons misleading. Because Field1 is resized and Field2 is not, results
+are reported **pooled and per-field as co-equal results** (test is ~80%
+Field2, so the pooled number alone is dominated by it).
+
+**Step B: copy-forward baseline** (prediction = last input image),
+`sbatch scripts/image_copy_forward_baseline.slurm`. Results: _pending run on Swan._
+
 ## Status
 
 **Phase 1 (baselines + CNN-LSTM) complete and verified on Swan:**
