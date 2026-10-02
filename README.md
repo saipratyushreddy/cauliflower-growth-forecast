@@ -660,6 +660,13 @@ assignments are unchanged by any exclusion; only pairs are removed.
    older history and is scrubbed from it (`BLURRY_EXCLUDE` in
    `src/build_image_pairs.py`). Dropping every pair with one anywhere in its
    history instead would remove 43 pairs (33/0/10); not applied.
+   *Explicitly checked:* in all 25 pairs where a blurry frame was scrubbed
+   from older history (19 train, 6 test), the gap from the last input to the
+   target is identical before and after scrubbing (0 of 25 differ, as expected:
+   a pair whose last input is a blurry frame is dropped, never scrubbed), so the
+   lenient rule is kept. Side effect, for later sequence models: the scrub
+   leaves an internal hole in the history of the 20 Plot5 pairs (max gap
+   between consecutive history frames 9 -> 15 days; Plot1 pairs unchanged at 9).
 3. **Field1 day 28 (2020-08-25): NOT excluded, stratified.** Dark but sharp
    (mean luma 37-40 vs ~108-112 on adjacent dates; leaf veins in focus; the
    whole flight, other plots even darker), i.e. valid data with a large
