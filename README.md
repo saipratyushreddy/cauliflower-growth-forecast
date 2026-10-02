@@ -610,7 +610,7 @@ predict its next acquired image.
 **Pairs** (`src/build_image_pairs.py` -> `data/image_pairs.parquet`): for a
 plant's k-th image (k>=1) the target is that image and the input is all
 earlier images. Every acquisition counts; no diameter label is required.
-8,638 pairs from all 739 plants.
+8,638 pairs before cleaning, **8,386 after** (below).
 
 **Split.** All 738 plants retain their Phase 0 split assignment, preserving
 an identical test set across tasks. The 739th plant (`2021_Ref_Plot2_B13`,
@@ -620,23 +620,6 @@ yields train (`round(0.7*1)=1`). Re-running the Phase 0 scheme on the full
 739-plant list was rejected because it reshuffles the entire permutation (125
 plants changed split, 29 Phase 0 train plants became test).
 
-| Split | Plants | Pairs | Field1 pairs | Field2 pairs |
-|---|---|---|---|---|
-| train | 518 | 6,015 | 1,199 | 4,816 |
-| val | 111 | 1,346 | 184 | 1,162 |
-| test | 110 | 1,277 | 255 | 1,022 |
-
-**Degenerate frames excluded.** 234 images are black/placeholder frames
-(<10KB; 232 are byte-identical, md5 `1fe4b7f0...`, 2 are near-black with a
-corner sliver). All are Field1, day 91/93, the last 1-2 acquisitions of 119
-plants. They produced 113 pixel-identical input/target pairs (SSIM=1.0)
-that inflated the first copy-forward result's Field1 SSIM. All 234 pairs
-whose input or target is such a frame are dropped (`--exclude-list`);
-plant split assignments are unchanged. Remaining: train 5,837 / val 1,330 /
-test 1,237 pairs (test Field1 215, Field2 1,022). The first (unfiltered)
-copy-forward run is superseded. Phase 0 is untouched, but its Field1
-late-season inputs may include these frames (not checked).
-
 **Resolution: all images are resized to 256x256.** Field1/2020 images
 (natively 490x490) are **downsampled** (Lanczos); Field2/2021 images are
 natively 256x256 and untouched. Upsampling Field2 instead would mean
@@ -645,52 +628,130 @@ comparisons misleading. Because Field1 is resized and Field2 is not, results
 are reported **pooled and per-field as co-equal results** (test is ~80%
 Field2, so the pooled number alone is dominated by it).
 
-**Step B: copy-forward baseline** (prediction = last input image), run on
-the filtered pairs (8,404 scored, 0 failures; `sbatch
-scripts/image_copy_forward_baseline.slurm`). Test split, 1,237 pairs, all
-images at 256x256. Pooled and per-field are co-equal results:
+### Image quality exclusions (applied) and checks (not excluded)
 
-| Test subset | Pairs | RGB SSIM mean (median) | RGB PSNR dB mean (median) | Structure SSIM mean (median) |
+| Step | Train | Val | Test | Total |
 |---|---|---|---|---|
-| Pooled | 1,237 | 0.122 (0.072) | 10.03 (9.06) | 0.044 (0.028) |
-| Field1/2020 (downsampled 490->256) | 215 | 0.096 (0.085) | 11.32 (10.53) | 0.018 (0.016) |
-| Field2/2021 (native 256) | 1,022 | 0.128 (0.067) | 9.76 (8.71) | 0.050 (0.032) |
+| Unfiltered pairs | 6,015 | 1,346 | 1,277 | 8,638 |
+| Black/placeholder frames removed | -178 | -16 | -40 | -234 |
+| Blurry frames removed | -14 | 0 | -4 | -18 |
+| **Final cleaned pairs** | **5,823** | **1,330** | **1,233** | **8,386** |
 
-Structure SSIM = luma, local contrast normalization (Gaussian sigma=7,
-eps=0.05, clip +-3), SSIM with data_range=6. Train/val agree with test
-(pooled SSIM 0.120 / 0.123). Field1 vs Field2 differences cannot be
-attributed to the field itself: Field1 is downsampled (smoothing) and the
-metrics disagree on direction (higher PSNR, lower SSIM and structure SSIM).
+Final composition: train 518 plants (Field1 1,021 / Field2 4,802 pairs), val
+111 plants (168 / 1,162), test 110 plants (215 / 1,018). Plant split
+assignments are unchanged by any exclusion; only pairs are removed.
 
-**Oracle reference, NOT a baseline: `oracle_colormatch`.** USES THE TARGET
-IMAGE'S per-channel mean/std, so it is not achievable at inference and is
-not comparable to the baseline above or to any trained model. It only
-bounds how much copy-forward error is global exposure/colour change.
-Test pooled: SSIM 0.158 (median 0.075), PSNR 12.67 dB (10.28). Field1 PSNR
-14.87, Field2 12.21. Matching colour recovers about +2.6 dB PSNR and +0.036
-SSIM, so global exposure is only part of the error. The very low structure
-SSIM (0.044) says the rest is spatial: canopy/leaf layout change,
-sub-plant misregistration between flights, and real growth.
+1. **Black/placeholder frames (excluded, 234 images).** All Field1, day
+   91/93 (last 1-2 acquisitions of 119 plants): 232 byte-identical
+   placeholders (md5 `1fe4b7f0...`) and 2 near-black frames (<10KB). They
+   produced 113 pixel-identical input/target pairs (SSIM=1.0) that inflated
+   an earlier Field1 SSIM. Every pair touching one is dropped
+   (`--exclude-list`).
+2. **Blurry frames (excluded, 9 images)**, from the blur scan plus a visual
+   check on a contact sheet (same-plant previous/next dates and same-date
+   same-plot / other-plot references alongside): `Plot5_{A16,A17,A18,B17}`
+   on 2021-08-11 and `Plot1_{A4,A5,A6,B6,B7}` on 2021-08-30. Leaf edges are
+   smeared (a resampled/stitching look, not darkness) while the same
+   plants a week earlier and same-date references are crisp; the affected
+   plant IDs are adjacent, suggesting a local region of the plot (a
+   hypothesis; the source orthomosaics were not inspected). Each is removed
+   as target (9 pairs) and as last input (9 pairs); no pair is created
+   across a removed frame. In 25 retained pairs such a frame appears only in
+   older history and is scrubbed from it (`BLURRY_EXCLUDE` in
+   `src/build_image_pairs.py`). Dropping every pair with one anywhere in its
+   history instead would remove 43 pairs (33/0/10); not applied.
+3. **Field1 day 28 (2020-08-25): NOT excluded, stratified.** Dark but sharp
+   (mean luma 37-40 vs ~108-112 on adjacent dates; leaf veins in focus; the
+   whole flight, other plots even darker), i.e. valid data with a large
+   exposure change. It touches 478 of 1,404 Field1 pairs (74 of 215 test).
+   Reported with and without it (see evaluation protocol).
+4. **Plot1 2021-06-16 (day 1): checked and cleared.** Bare soil with tiny
+   seedlings; flagged only because low-texture soil gives low variance of
+   Laplacian. As sharp as same-date references.
 
-**Reading these numbers.** (1) SSIM is heavy-tailed: means exceed medians
-(e.g. gap 7-10 days: mean 0.175, median 0.066), driven by a few static,
-dim early-season pairs (best Field2 pair: day 8->16, SSIM 0.70). Report
-medians alongside means. (2) Gap buckets are confounded with growth stage
-and field and SSIM does not fall with gap (means 0.069 / 0.113 / 0.175 /
-0.059 for gaps <=4 / 4-7 / 7-10 / >10 days), so they are not evidence
-about forecast horizon; stratify by growth stage instead.
+**Limitation of the blur scan (stated, not open).** Variance of Laplacian
+flags the bottom 1% within each (field, day) group *by construction*, so it
+cannot say how many other images are soft; 88 images were flagged and only
+the four clusters above were inspected. It also confuses blur with
+darkness/low contrast. Residual softness outside the 9 excluded frames may
+exist in both inputs and targets and is not quantified. Only a visual check
+at ~200px thumbnails was done.
 
-**Blur scan** (`src/blur_scan.py`, variance of Laplacian on 9,377 images,
-bottom 1% within each field x day group flagged = 88 images / 80 plants;
-flagging is relative by construction, so ~1% is always flagged). The 234
-known black frames have VoL ~0, far below every other image (non-degenerate
-minimum 23.6 Field2, 83 Field1), so no further black/blank frames were
-found. Flagged images cluster by plot x date (e.g. Plot5 2021-08-11, Plot1
-2021-08-30, Plot5 2021-07-01), which suggests flight/plot-level softness
-rather than isolated corrupt files; not yet visually verified. Field1
-day 28 (2020-08-25) has median VoL 160 vs 1,412 on day 22 and 3,038 on day
-36, i.e. the whole flight is soft and/or dark; it touches 478 of 1,404
-Field1 pairs (74 of 215 test).
+### Evaluation protocol (final)
+
+Reported on the **test split of the cleaned pair set** (1,233 pairs), for:
+pooled; pooled excluding Field1 day-28 pairs; Field1; Field1 excluding day
+28; Field1 day 28 only (and its two directions); Field2. Each reports **mean
+and median** of RGB SSIM, RGB PSNR and structure SSIM (luma, local contrast
+normalization with Gaussian sigma=7, eps=0.05, clip +-3, SSIM data_range=6).
+A "day-28 pair" is a Field1 pair whose last input or target is day 28.
+Medians are always reported because SSIM is heavy-tailed. Gap-length buckets
+are not used (confounded with growth stage and field; see below). Scores
+come from `src/image_copy_forward_baseline.py`, aggregated by
+`src/summarize_baseline.py` (`outputs/img_stepB_final_protocol.json`).
+
+### Step B: copy-forward baseline (honest) -- results
+
+Prediction = the plant's last input image, unchanged. Test split:
+
+| Subset | Pairs | RGB SSIM mean (median) | RGB PSNR dB mean (median) | Structure SSIM mean (median) |
+|---|---|---|---|---|
+| Pooled | 1,233 | 0.122 (0.072) | 10.04 (9.06) | 0.044 (0.028) |
+| Pooled excl. Field1 day 28 | 1,159 | 0.124 (0.070) | 10.10 (9.08) | 0.046 (0.029) |
+| Field1 (downsampled) | 215 | 0.096 (0.085) | 11.32 (10.53) | 0.018 (0.016) |
+| Field1 excl. day 28 | 141 | 0.096 (0.082) | 12.53 (11.59) | 0.019 (0.014) |
+| Field1 day 28 only | 74 | 0.095 (0.089) | 9.03 (8.98) | 0.017 (0.017) |
+| &nbsp;&nbsp;target is day 28 (bright->dark) | 37 | 0.095 (0.083) | 8.77 (8.75) | 0.018 (0.018) |
+| &nbsp;&nbsp;input is day 28 (dark->bright) | 37 | 0.094 (0.098) | 9.30 (9.35) | 0.016 (0.016) |
+| Field2 (native) | 1,018 | 0.128 (0.067) | 9.76 (8.71) | 0.050 (0.032) |
+
+- **Day 28 is an exposure effect that only PSNR sees.** Day-28 pairs score
+  3.5 dB lower PSNR than the rest of Field1 (9.03 vs 12.53) but the same
+  RGB SSIM (0.095 vs 0.096) and structure SSIM (0.017 vs 0.019). Holding
+  them out moves the pooled numbers very little (PSNR 10.04 -> 10.10, SSIM
+  0.122 -> 0.124) because they are 6% of test pairs.
+- **Field1 vs Field2 is not attributable to the field.** The metrics
+  disagree on direction (Field1 higher PSNR, lower SSIM and structure
+  SSIM) and Field1 is the downsampled field.
+- **Structure SSIM is very low everywhere (0.044 pooled)** even with
+  exposure and local contrast removed, so most copy-forward error is spatial
+  (canopy/leaf layout change, sub-plant misregistration between flights,
+  real growth), not lighting.
+- **SSIM is heavy-tailed** (Field2 mean 0.128, median 0.067), driven by a
+  few static, dim early-season pairs. The earlier gap-bucket breakdown
+  (SSIM did not fall with gap) is confounded with growth stage and field and
+  is not evidence about forecast horizon.
+
+### Oracle colour-match -- reference only, NOT a baseline
+
+**ORACLE: it USES THE TARGET IMAGE'S per-channel mean/std. Not achievable at
+inference; not comparable to the baseline above or to any trained model.**
+It only bounds how much copy-forward error is global exposure/colour change.
+
+| Subset (test) | Pairs | ORACLE SSIM mean (median) | ORACLE PSNR dB mean (median) |
+|---|---|---|---|
+| Pooled | 1,233 | 0.158 (0.075) | 12.68 (10.29) |
+| Pooled excl. Field1 day 28 | 1,159 | 0.151 (0.074) | 12.34 (9.80) |
+| Field1 | 215 | 0.160 (0.103) | 14.87 (13.90) |
+| Field1 excl. day 28 | 141 | 0.103 (0.103) | 13.28 (13.90) |
+| Field1 day 28 only | 74 | 0.268 (0.247) | 17.91 (17.78) |
+| &nbsp;&nbsp;target is day 28 (bright->dark) | 37 | 0.467 (0.455) | 24.35 (24.16) |
+| &nbsp;&nbsp;input is day 28 (dark->bright) | 37 | 0.069 (0.070) | 11.47 (11.44) |
+| Field2 | 1,018 | 0.158 (0.070) | 12.21 (9.51) |
+
+**Day-28 cross-check (Field1 test).** Colour matching gains +8.9 dB on
+day-28 pairs versus +0.75 dB on the rest of Field1, taking day-28 PSNR from
+3.5 dB *below* the rest (9.03 vs 12.53) to 4.6 dB *above* it (17.91 vs
+13.28): it closes the whole gap and overshoots. This confirms the day-28
+effect is global exposure, consistent with day-28 pairs having unchanged
+SSIM and structure SSIM relative to the rest of Field1. (The "fraction of
+gap closed" values in the JSON, 2.5 for PSNR and 145 for SSIM, are not
+meaningful for SSIM because the honest SSIM gap is ~0.001; use the gains.)
+The asymmetry by direction (bright->dark SSIM 0.467; dark->bright 0.069) is
+not explained: candidates are stretching an 8-bit dark, low-contrast image
+amplifying noise, and day 28->36 being a larger growth step than 22->28;
+neither was tested. Because the oracle's Field1 headline (0.160 SSIM) is
+driven by day-28 pairs, always read it stratified.
 
 ## Status
 
