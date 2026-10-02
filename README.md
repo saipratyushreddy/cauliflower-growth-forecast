@@ -626,6 +626,17 @@ plants changed split, 29 Phase 0 train plants became test).
 | val | 111 | 1,346 | 184 | 1,162 |
 | test | 110 | 1,277 | 255 | 1,022 |
 
+**Degenerate frames excluded.** 234 images are black/placeholder frames
+(<10KB; 232 are byte-identical, md5 `1fe4b7f0...`, 2 are near-black with a
+corner sliver). All are Field1, day 91/93, the last 1-2 acquisitions of 119
+plants. They produced 113 pixel-identical input/target pairs (SSIM=1.0)
+that inflated the first copy-forward result's Field1 SSIM. All 234 pairs
+whose input or target is such a frame are dropped (`--exclude-list`);
+plant split assignments are unchanged. Remaining: train 5,837 / val 1,330 /
+test 1,237 pairs (test Field1 215, Field2 1,022). The first (unfiltered)
+copy-forward run is superseded. Phase 0 is untouched, but its Field1
+late-season inputs may include these frames (not checked).
+
 **Resolution: all images are resized to 256x256.** Field1/2020 images
 (natively 490x490) are **downsampled** (Lanczos); Field2/2021 images are
 natively 256x256 and untouched. Upsampling Field2 instead would mean

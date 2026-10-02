@@ -15,6 +15,11 @@ Differences from the Phase 0 diameter pipeline (build_pairs.py):
     split_data.split_plants (RandomState(seed)) applied to that single plant.
     NOTE: with n=1, round(0.7*1)=1, so that plant deterministically lands in
     train; this is a documented exception, not a random draw.
+  * --exclude-list drops every pair whose input OR target image is a
+    degenerate (black/placeholder) frame. 234 files <10KB were found on Swan
+    (232 byte-identical placeholders + 2 near-black frames), all Field1,
+    day 91/93 (last 1-2 acquisitions of 119 plants). Plant split assignments
+    are unaffected; only pairs are removed.
 
 Usage:
     python src/build_image_pairs.py --metadata data/metadata.parquet \
@@ -54,6 +59,9 @@ def main():
     ap.add_argument("--metadata", required=True)
     ap.add_argument("--phase0-split", required=True,
                     help="Phase 0 pairs_split.parquet; its plant->split assignments are kept as-is")
+    ap.add_argument("--exclude-list", default=None,
+                    help="md5sum-style file ('<md5>  <filepath>' per line) of degenerate images; "
+                         "pairs with any such image as input or target are dropped")
     ap.add_argument("--out", required=True)
     ap.add_argument("--seed", type=int, default=SEED)
     args = ap.parse_args()
@@ -79,6 +87,14 @@ def main():
 
     pairs = build_pairs(meta)
     assert pairs["pair_id"].is_unique
+    if args.exclude_list:
+        bad = set(pd.read_csv(args.exclude_list, sep=r"\s+", header=None, names=["md5", "fp"])["fp"])
+        assert bad <= set(meta["filepath"]), "exclude-list has paths not in metadata"
+        drop = pairs["target_filepath"].isin(bad) | pairs["input_filepaths"].apply(lambda l: any(f in bad for f in l))
+        print(f"Excluding {drop.sum()} pairs touching {len(bad)} degenerate images "
+              f"({pairs[drop]['plant_id'].nunique()} plants, fields {sorted(pairs[drop]['field'].unique())}):")
+        print(pairs[drop].groupby(["field", "pair_id"]).size().groupby("field").size().to_string())
+        pairs = pairs[~drop].reset_index(drop=True)
     pairs["split"] = pairs["plant_id"].map(split_of)
     assert (pairs.groupby("plant_id")["split"].nunique() == 1).all()
 
