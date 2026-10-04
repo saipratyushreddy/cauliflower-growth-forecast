@@ -729,11 +729,17 @@ Prediction = the plant's last input image, unchanged. Test split:
   (SSIM did not fall with gap) is confounded with growth stage and field and
   is not evidence about forecast horizon.
 
-### Oracle colour-match -- reference only, NOT a baseline
+### Oracle colour-match -- reference only; NOT a baseline and NOT an upper bound
 
-**ORACLE: it USES THE TARGET IMAGE'S per-channel mean/std. Not achievable at
-inference; not comparable to the baseline above or to any trained model.**
-It only bounds how much copy-forward error is global exposure/colour change.
+**ORACLE: it USES THE TARGET IMAGE'S per-channel mean/std, so it cannot be
+run at inference, and it is not comparable to the baseline above or to any
+trained model.** *Correction (supersedes the earlier wording that it
+"bounds" the exposure error):* it is **not a ceiling**. Control 2 below
+uses only training-set statistics and reaches within ~0.003 SSIM / ~0.24
+dB of it (pooled: SSIM 0.155 vs 0.158, PSNR 12.44 vs 12.68 dB), so
+exposure is almost entirely predictable from (field, input_day,
+target_day) alone, and the trained model exceeds the oracle on the
+day-28-target pairs (28.2 vs 24.4 dB).
 
 | Subset (test) | Pairs | ORACLE SSIM mean (median) | ORACLE PSNR dB mean (median) |
 |---|---|---|---|
@@ -754,11 +760,172 @@ effect is global exposure, consistent with day-28 pairs having unchanged
 SSIM and structure SSIM relative to the rest of Field1. (The "fraction of
 gap closed" values in the JSON, 2.5 for PSNR and 145 for SSIM, are not
 meaningful for SSIM because the honest SSIM gap is ~0.001; use the gains.)
-The asymmetry by direction (bright->dark SSIM 0.467; dark->bright 0.069) is
-not explained: candidates are stretching an 8-bit dark, low-contrast image
-amplifying noise, and day 28->36 being a larger growth step than 22->28;
-neither was tested. Because the oracle's Field1 headline (0.160 SSIM) is
-driven by day-28 pairs, always read it stratified.
+Always read the oracle stratified: its Field1 headline (0.160 SSIM) is
+driven by day-28 pairs.
+
+### Step C: single-frame learned model (first trained image model)
+
+Input per pair: only the most recent image plus the scalar day offset
+(`target_day - input_last_day`); earlier history is never read.
+`src/img_film_unet.py` (9.3M parameters): ResNet-style encoder to an 8x8
+bottleneck, FiLM (scale/shift from an MLP of the offset, zero-initialised)
+at the bottleneck, U-Net decoder with skips, sigmoid output generated
+directly (no residual to the input). Loss = 1.0 L1 + 1.0 (1 - SSIM)
+(differentiable Gaussian-window SSIM; no adversarial term, no colour-match
+logic), untuned weights. Train-only augmentation: joint flips / 90-degree
+rotations. `src/train_img_single_frame.py`, `sbatch
+scripts/train_img_single_frame.slurm`. Pairs: 5,823 train / 1,330 val / 1,233
+test. Early-stopped at epoch 73, best epoch 61 chosen on validation combined
+loss only (0.902), ~33 s/epoch, 40 min total; test evaluated exactly once.
+Validation plateaus around epochs 40-60 while train keeps improving (SSIM
+0.288 train vs 0.273 val at the selected epoch): mild overfitting. Training
+SSIM uses a Gaussian window; evaluation uses the same skimage metrics as every
+other row below.
+
+### Step C controls (closed-form, no training)
+
+Test touched exactly once per control. All use the copy-forward base.
+
+- **Control 1, blurred copy-forward:** Gaussian blur (sigma = 16), chosen as
+  the grid value (0.5-64) maximizing mean *validation* RGB SSIM. (Chosen over
+  "matching the model's validation SSIM" because that figure comes from a
+  different SSIM implementation, and the maximum gives the control its best
+  shot.) Validation structure SSIM peaks at sigma = 2 (0.0547 vs 0.0455
+  unblurred) and falls to 0.0483 at sigma 16: no blur sigma comes near the
+  model's 0.082 on this metric (validation-only evidence; a second sigma was not
+  evaluated on test).
+- **Control 2, flight-aware colour copy-forward:** per (field, input_day,
+  target_day) bucket, from training pairs only, the mean of the target
+  images' per-channel mean/std; each test input is standardized by its own
+  per-channel mean/std and rescaled to the bucket's values (no test-target
+  statistics). 22 buckets; training pairs per bucket used for a test pair: min
+  7, median 344, max 344. Buckets with <10 training pairs fall back to
+  (field, target_day).
+- **Control 3:** Control 2's colour transform, then Control 1's blur (same
+  sigma).
+
+**Caveat on control 2 / the oracle's apparent success:** exposure is
+predictable here because every plant in a field is photographed on the same
+dates. This is an in-dataset property and will not transfer to unseen
+flights or seasons.
+
+#### Results (test, 1,233 pairs, mean (median))
+
+**Structure SSIM -- the headline comparison**
+
+| Subset | Copy-fwd | C1 blur s=16 | C2 flight-colour | C3 colour+blur | **Model (Step C)** |
+|---|---|---|---|---|---|
+| Pooled | 0.044 (0.028) | 0.049 (0.032) | 0.048 (0.030) | 0.049 (0.032) | **0.082 (0.054)** |
+| Pooled excl. Field1 day 28 | 0.046 (0.029) | 0.047 (0.032) | 0.049 (0.030) | 0.047 (0.032) | **0.080 (0.054)** |
+| Field1 | 0.018 (0.016) | 0.047 (0.030) | 0.022 (0.016) | 0.052 (0.031) | **0.071 (0.050)** |
+| Field1 excl. day 28 | 0.019 (0.014) | 0.029 (0.030) | 0.020 (0.015) | 0.030 (0.031) | **0.050 (0.048)** |
+| Field1 day 28 only | 0.017 (0.017) | 0.081 (0.065) | 0.026 (0.025) | 0.094 (0.082) | **0.111 (0.102)** |
+| &nbsp;&nbsp;target is day 28 | 0.018 (0.018) | 0.138 (0.133) | 0.042 (0.041) | 0.168 (0.161) | **0.184 (0.175)** |
+| &nbsp;&nbsp;input is day 28 | 0.016 (0.016) | 0.023 (0.024) | 0.011 (0.010) | 0.020 (0.020) | **0.037 (0.038)** |
+| Field2 | 0.050 (0.032) | 0.049 (0.032) | 0.054 (0.034) | 0.049 (0.032) | **0.085 (0.056)** |
+
+Paired difference, model minus control, structure SSIM, mean (median), and
+share of pairs where the model is better:
+
+| Subset | Pairs | vs copy-fwd | vs C1 | vs C2 | vs C3 |
+|---|---|---|---|---|---|
+| Pooled | 1,233 | +0.038 (+0.027), 87% | +0.034 (+0.022), 88% | +0.034 (+0.026), 86% | +0.033 (+0.021), 88% |
+| Pooled excl. day 28 | 1,159 | +0.035 (+0.026), 86% | +0.034 (+0.022), 88% | +0.031 (+0.025), 85% | +0.034 (+0.021), 88% |
+| Field1 | 215 | +0.052 (+0.033), 99% | +0.024 (+0.021), 91% | +0.049 (+0.033), 99% | +0.019 (+0.016), 92% |
+| Field1 excl. day 28 | 141 | +0.031 (+0.030), 99% | +0.021 (+0.021), 90% | +0.030 (+0.030), 99% | +0.020 (+0.017), 89% |
+| Field1 day 28 only | 74 | +0.094 (+0.084), 100% | +0.030 (+0.031), 92% | +0.084 (+0.075), 100% | +0.016 (+0.016), 99% |
+| &nbsp;&nbsp;target is day 28 | 37 | +0.166 (+0.166), 100% | +0.046 (+0.045), 100% | +0.142 (+0.142), 100% | +0.016 (+0.015), 100% |
+| &nbsp;&nbsp;input is day 28 | 37 | +0.021 (+0.020), 100% | +0.015 (+0.014), 84% | +0.027 (+0.028), 100% | +0.017 (+0.018), 97% |
+| Field2 | 1,018 | +0.035 (+0.024), 84% | +0.036 (+0.022), 88% | +0.031 (+0.023), 84% | +0.036 (+0.022), 88% |
+
+**Structure SSIM verdict.** Pooled, copy-forward 0.044 -> best control 0.049
+-> model 0.082. The model is ahead of every control in every subset; the
+smallest margin against Control 3 is +0.016 (day-28 pairs, including the
+target-is-day-28 direction), and the smallest margin anywhere is +0.015
+(against Control 1, input-is-day-28 pairs). Blur and per-flight exposure
+therefore do **not** account for the model's structure SSIM gain. This is a
+statement about structure SSIM only; absolute structural fidelity remains low
+(median 0.054), and all outputs are blurry.
+
+**RGB SSIM**
+
+| Subset | Copy-fwd | C1 | C2 | C3 | Model |
+|---|---|---|---|---|---|
+| Pooled | 0.122 (0.072) | 0.189 (0.116) | 0.155 (0.072) | 0.217 (0.121) | 0.254 (0.159) |
+| Pooled excl. Field1 day 28 | 0.124 (0.070) | 0.188 (0.114) | 0.149 (0.070) | 0.206 (0.117) | 0.243 (0.156) |
+| Field1 | 0.096 (0.085) | 0.204 (0.224) | 0.156 (0.105) | 0.276 (0.231) | 0.304 (0.255) |
+| Field1 excl. day 28 | 0.096 (0.082) | 0.207 (0.224) | 0.102 (0.105) | 0.212 (0.231) | 0.238 (0.255) |
+| Field1 day 28 only | 0.095 (0.089) | 0.198 (0.184) | 0.260 (0.263) | 0.399 (0.385) | 0.430 (0.423) |
+| &nbsp;&nbsp;target is day 28 | 0.095 (0.083) | 0.289 (0.261) | 0.451 (0.445) | 0.660 (0.648) | 0.703 (0.701) |
+| &nbsp;&nbsp;input is day 28 | 0.094 (0.098) | 0.107 (0.111) | 0.068 (0.069) | 0.138 (0.149) | 0.157 (0.167) |
+| Field2 | 0.128 (0.067) | 0.185 (0.107) | 0.155 (0.067) | 0.205 (0.110) | 0.243 (0.146) |
+
+**RGB PSNR (dB)**
+
+| Subset | Copy-fwd | C1 | C2 | C3 | Model |
+|---|---|---|---|---|---|
+| Pooled | 10.04 (9.06) | 11.61 (10.97) | 12.44 (10.01) | 14.40 (12.04) | 14.84 (12.40) |
+| Pooled excl. Field1 day 28 | 10.10 (9.08) | 11.76 (11.15) | 12.12 (9.56) | 14.06 (11.74) | 14.43 (12.11) |
+| Field1 | 11.32 (10.53) | 12.91 (12.18) | 14.73 (13.93) | 16.97 (16.09) | 17.80 (16.66) |
+| Field1 excl. day 28 | 12.53 (11.59) | 14.83 (14.38) | 13.23 (13.93) | 15.54 (16.09) | 15.94 (16.66) |
+| Field1 day 28 only | 9.03 (8.98) | 9.25 (9.25) | 17.57 (17.27) | 19.70 (19.32) | 21.35 (21.12) |
+| &nbsp;&nbsp;target is day 28 | 8.77 (8.75) | 9.15 (9.13) | 23.75 (23.83) | 25.81 (25.86) | 28.23 (28.27) |
+| &nbsp;&nbsp;input is day 28 | 9.30 (9.35) | 9.35 (9.39) | 11.40 (11.40) | 13.59 (13.56) | 14.47 (14.67) |
+| Field2 | 9.76 (8.71) | 11.33 (10.77) | 11.96 (9.26) | 13.85 (11.56) | 14.22 (11.79) |
+
+**RGB SSIM and PSNR gains overstate the model's real progress.** Control 3
+alone, a closed-form blur plus per-flight colour transform with no learning,
+reproduces **72% of the model's SSIM gain** over copy-forward (+0.095 of
++0.132) and **91% of its PSNR gain** (+4.36 of +4.81 dB), but only **13% of
+its structure SSIM gain** (+0.005 of +0.038). These two metrics must not be
+used alone to judge any future model stage.
+
+**Thin-bucket caveat.** Three Field1 test pairs (day 83 -> 97:
+`Plot3_A9`, `Plot3_C10`, `Plot3_C7`) have only 7 training pairs even in
+Control 2's (field, target_day) fallback bucket (below the 10-pair
+threshold). That bucket was still used (flagged `thin_bucket` in
+`outputs/img_ctrl2_per_pair.csv`; the pairs were kept so every method is
+scored on the identical 1,233 pairs). Control 2/3 results on that handful of
+pairs are less reliable; it is 3 of 1,233 test pairs.
+
+**Open question (unresolved): the day-28-input asymmetry.** Every method
+that corrects exposure or smooths scores far higher when the target is day
+28 than when the input is day 28: oracle SSIM 0.467 vs 0.069, Control 2
+0.451 vs 0.068, Control 1 0.289 vs 0.107, Control 3 0.660 vs 0.138, model
+0.703 vs 0.157. Plain copy-forward shows **no** such asymmetry (0.095 vs
+0.094), so the effect appears only once a method alters the input, and it
+appears across methods that differ in what they do (colour standardization,
+pure blur, learned model), so it is not one method's weakness. The project
+has **not** tested which explains it: (a) noise amplification from stretching
+a dark, low-contrast 8-bit image (the case when the input is day 28; it
+cannot explain Control 1, which does no stretching), or (b) a genuinely
+larger growth step from day 28 to 36 than from 22 to 28. An additional
+candidate suggested by the Control 1 numbers, also untested: (c) SSIM and
+structure SSIM are easy to score on a dark, low-contrast *target* (day 28)
+with any smooth prediction, and hard on a bright, textured one.
+
+**Qualitative grid (illustration only).** `outputs/img_ctrl_grid.png` shows
+four test pairs (one day-28 target pair, one other Field1 pair, one
+early-season and one late-season Field2 pair; fixed seed) as input, target,
+copy-forward, C1, C2, C3 and model. It is an illustration only and is not
+evidence on its own; the conclusions above rest on the metrics.
+In the grid, all methods are blurry, none recovers leaf-level detail, and
+the model retains coarse layout (for example the plant against soil in the
+day 22 -> 28 pair) that the colour-and-blur controls lose.
+
+### Evaluation protocol for all future model stages (temporal, Transformer)
+
+Report **both** of the following, **together in the same table, always**,
+never structure SSIM alone or RGB metrics alone:
+
+1. **Structure SSIM against the best prior model stage** (for the temporal
+   model: the Step C single-frame model, 0.082 pooled test), and
+2. **Pooled RGB SSIM and PSNR against Control 3** (0.217 SSIM, 14.40 dB
+   pooled test),
+
+on the cleaned pair set, with the stratification above (pooled, per-field,
+with/without day 28; mean and median). This is what catches a future model
+finding a different shortcut.
 
 ## Status
 
