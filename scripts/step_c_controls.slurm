@@ -16,7 +16,7 @@ cd "$PROJECT_DIR"
 source .venv/bin/activate
 
 # CPU only, closed-form, no training. Needs data/images256.npy (made by the Step C job) and the Step C outputs.
-python -u src/step_c_controls.py --image-pairs data/image_pairs.parquet --cache-dir data --out-dir outputs \
+python -u src/step_c_controls.py --image-pairs data/image_pairs.parquet --cache-dir data --out-dir outputs --reuse-val-curve \
     --model-checkpoint checkpoints/img_single_frame_best.pt \
     --model-per-pair-csv outputs/img_single_frame_per_pair.csv \
     --copy-forward-per-pair-csv outputs/img_stepB_copy_forward_per_pair.csv

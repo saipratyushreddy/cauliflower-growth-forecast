@@ -17,7 +17,10 @@ sigma for control 1 is chosen on VALIDATION only.
              (observable) per-channel mean/std and re-scaled to the bucket's (M_t, S_t):
              y = (x - m_x) / s_x * S_t + M_t. No test-target statistics are used (contrast with the
              oracle). Buckets with <10 training pairs fall back to (field, target_day); fallback pairs are
-             flagged in the per-pair CSV (bucket_n, used_fallback).
+             flagged in the per-pair CSV (bucket_n, used_fallback). If even the fallback bucket has
+             <10 training pairs (3 Field1 83->97 test pairs, 7 training pairs), that fallback bucket is
+             still used and the pair is additionally flagged thin_bucket=True (keeps the pair set
+             identical across methods; not dropped).
   CONTROL 3  control 2's colour transform, then control 1's blur (sigma from control 1).
 
 All outputs are rounded to uint8 and scored with the same skimage RGB SSIM/PSNR + structure SSIM as
@@ -89,7 +92,7 @@ def control2_pred(arr, r, buckets, fallback):
     used_fb = n < MIN_BUCKET
     if used_fb:
         st, n = fallback.get((r.field, r.target_day), (None, 0))
-        assert st is not None and n >= MIN_BUCKET, f"no usable bucket for {key} even at (field,target_day)"
+        assert st is not None and n >= 1, f"no training pairs for {key} even at (field,target_day)"
     return colour_transform(arr[int(r.row_in)], st[0], st[1]), n, used_fb
 
 
@@ -138,6 +141,8 @@ def main():
     ap.add_argument("--copy-forward-per-pair-csv", default=None)
     ap.add_argument("--smoke", action="store_true")
     ap.add_argument("--min-bucket", type=int, default=10)
+    ap.add_argument("--reuse-val-curve", action="store_true",
+                    help="reuse the saved validation sigma curve CSV (same val data) instead of recomputing the sweep")
     args = ap.parse_args()
     global MIN_BUCKET
     MIN_BUCKET = args.min_bucket
@@ -155,8 +160,13 @@ def main():
 
     # ---- Control 1: pick sigma on VAL only ----
     print("Control 1: validation sweep over blur sigma", flush=True)
-    curve = val_curve(arr, va)
-    curve.to_csv(os.path.join(args.out_dir, f"{tag}img_ctrl1_val_sigma_curve.csv"), index=False)
+    curve_path = os.path.join(args.out_dir, f"{tag}img_ctrl1_val_sigma_curve.csv")
+    if args.reuse_val_curve and os.path.exists(curve_path):
+        curve = pd.read_csv(curve_path)
+        print(f"  (reusing saved validation curve {curve_path})\n{curve.round(4).to_string(index=False)}", flush=True)
+    else:
+        curve = val_curve(arr, va)
+        curve.to_csv(curve_path, index=False)
     best = curve.loc[curve[curve.sigma > 0]["val_ssim"].idxmax()]
     sigma = float(best["sigma"])
     sbest = float(curve.loc[curve["val_structure_ssim"].idxmax(), "sigma"])
@@ -190,14 +200,19 @@ def main():
         if k != "ctrl1":
             df["bucket_n"] = [m[0] for m in meta2]
             df["used_fallback"] = [m[1] for m in meta2]
+            df["thin_bucket"] = df["bucket_n"] < MIN_BUCKET
         df.to_csv(os.path.join(args.out_dir, f"{tag}img_{k}_per_pair.csv"), index=False)
         res[k] = df
         print(df[["ssim", "psnr", "structure_ssim"]].agg(["mean", "median"]).round(4).to_string(), flush=True)
     m2 = res["ctrl2"]
     fb = m2[m2.used_fallback]
+    thin = m2[m2.thin_bucket]
+    print(f"Control 2: {len(thin)} test pairs have <{MIN_BUCKET} training pairs even after fallback "
+          f"(thin_bucket): {sorted(thin.pair_id)}", flush=True)
     out["ctrl2_bucket_n_per_test_pair"] = {"min": int(m2.bucket_n.min()), "median": float(m2.bucket_n.median()),
                                            "max": int(m2.bucket_n.max())}
     out["ctrl2_test_pairs_using_fallback"] = int(len(fb))
+    out["ctrl2_test_pairs_thin_bucket"] = sorted(thin.pair_id)
     print(f"Control 2 bucket training-pair count per test pair: min {m2.bucket_n.min()}, median "
           f"{m2.bucket_n.median():.0f}, max {m2.bucket_n.max()}; fallback to (field,target_day) used for "
           f"{len(fb)} of {len(m2)} test pairs", flush=True)
