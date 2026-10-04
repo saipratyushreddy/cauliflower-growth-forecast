@@ -8,8 +8,8 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
 #SBATCH --time=08:00:00
-#SBATCH --output=%x_K${K}_%j.out
-#SBATCH --error=%x_K${K}_%j.err
+#SBATCH --output=%x_%j.out
+#SBATCH --error=%x_%j.err
 
 # Submit once per K (same architecture and hyperparameters, differing only in K):
 #   sbatch --export=ALL,K=4 --job-name=img-convlstm-k4 scripts/train_img_convlstm.slurm
