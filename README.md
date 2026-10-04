@@ -888,21 +888,42 @@ threshold). That bucket was still used (flagged `thin_bucket` in
 scored on the identical 1,233 pairs). Control 2/3 results on that handful of
 pairs are less reliable; it is 3 of 1,233 test pairs.
 
-**Open question (unresolved): the day-28-input asymmetry.** Every method
+**The day-28 asymmetry: partly explained, partly still open.** Every method
 that corrects exposure or smooths scores far higher when the target is day
 28 than when the input is day 28: oracle SSIM 0.467 vs 0.069, Control 2
 0.451 vs 0.068, Control 1 0.289 vs 0.107, Control 3 0.660 vs 0.138, model
 0.703 vs 0.157. Plain copy-forward shows **no** such asymmetry (0.095 vs
-0.094), so the effect appears only once a method alters the input, and it
-appears across methods that differ in what they do (colour standardization,
-pure blur, learned model), so it is not one method's weakness. The project
-has **not** tested which explains it: (a) noise amplification from stretching
-a dark, low-contrast 8-bit image (the case when the input is day 28; it
-cannot explain Control 1, which does no stretching), or (b) a genuinely
-larger growth step from day 28 to 36 than from 22 to 28. An additional
-candidate suggested by the Control 1 numbers, also untested: (c) SSIM and
-structure SSIM are easy to score on a dark, low-contrast *target* (day 28)
-with any smooth prediction, and hard on a bright, textured one.
+0.094), so it appears only once a method alters the input, across methods
+that differ in what they do (colour standardization, pure blur, learned
+model). Three candidate explanations, and where they stand:
+
+- **(c) SSIM rewards smooth output on a low-contrast target: premise
+  confirmed, mechanism supported but not isolated.**
+  `src/target_variance_check.py` on the 1,233 test pairs: day-28 *target*
+  images have median luma std 11.0 vs 63.7 for all other targets (ratio
+  0.17; vs 43.2 for other Field1 targets, ratio 0.25), median local std 0.020
+  vs 0.146 (Mann-Whitney p ~1e-19 to 1e-21), mean luma 26 vs 101, and 93% of
+  their pixels have local std below the structure-SSIM stabiliser eps = 0.05
+  (14% for other targets, 7% for other Field1). Across *all* test pairs,
+  per-pair SSIM falls with target contrast for every method (Spearman, target
+  luma std: copy-forward -0.67, Control 1 -0.87, model -0.83); structure SSIM
+  shows the same sign but weaker (-0.15, -0.32, -0.48). Caveats: contrast is
+  confounded with darkness and with growth stage (low-contrast early-season
+  targets are also the static, easy ones), no within-stage control was run,
+  and because 93% of day-28 target pixels sit below eps, structure SSIM is
+  partly degenerate on these 37 pairs. Consequence: day-28 target-pair scores
+  (e.g. the model's 0.703 SSIM / 0.184 structure SSIM) overstate skill, which
+  is why results are always also reported excluding day 28.
+  The same 74 day-28 images are the inputs of the "input is day 28" pairs, so
+  those inputs are equally low-contrast (median luma std 11.0); the
+  asymmetry is about which side of the pair has the low contrast.
+- **(a) Noise amplification from stretching a dark, low-contrast 8-bit input:
+  does not explain Control 1** (pure blur, no stretching), **but is not
+  excluded for the oracle and Control 2.** Both standardize an input whose
+  std is ~11 up to a target std of ~60, a ~5x gain, so amplifying noise is
+  plausible there. Untested.
+- **(b) A genuinely larger growth step from day 28 to 36 than from 22 to 28:
+  open, untested.**
 
 **Qualitative grid (illustration only).** `outputs/img_ctrl_grid.png` shows
 four test pairs (one day-28 target pair, one other Field1 pair, one
