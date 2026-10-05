@@ -141,7 +141,9 @@ def main():
     device = torch.device(args.device)
     os.makedirs(args.out_dir, exist_ok=True)
     os.makedirs(args.checkpoint_dir, exist_ok=True)
-    tag = f"{'smoke_' if args.smoke else ''}img_convlstm_k{args.k}"
+    # Seed 42 (the original runs) keeps its file names; any other seed gets a _seed<N> suffix so
+    # repeat runs never overwrite earlier outputs.
+    tag = f"{'smoke_' if args.smoke else ''}img_convlstm_k{args.k}" + ("" if args.seed == 42 else f"_seed{args.seed}")
 
     pairs = load_rows(args.image_pairs, args.cache_dir)
     arr = np.load(os.path.join(args.cache_dir, "images256.npy"))
