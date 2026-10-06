@@ -27,12 +27,15 @@ from train_img_single_frame import (EXPECTED_COUNTS, batches, figure, load_rows,
                                     score_pairs)
 
 
-def build_histories(pairs, cache_idx):
-    """Full (post-scrub) history per pair: cache rows, and offsets = target_day - input_day for each frame."""
+def build_histories(pairs, cache_idx, max_history=0):
+    """Full (post-scrub) history per pair: cache rows, and offsets = target_day - input_day for each frame.
+    max_history > 0 keeps only the most recent max_history frames (1 = the single-frame control)."""
     rows, offs = [], []
     for r in pairs.itertuples(index=False):
         fps, days = list(r.input_filepaths), list(r.input_days)
         assert fps[-1] == r.input_last_filepath and days[-1] == r.input_last_day
+        if max_history > 0:
+            fps, days = fps[-max_history:], days[-max_history:]
         rows.append(np.array([cache_idx[f] for f in fps], dtype=np.int64))
         offs.append(np.array([r.target_day - d for d in days], dtype=np.float32))
     return rows, offs
@@ -140,6 +143,9 @@ def main():
     ap.add_argument("--num-layers", type=int, default=2)
     ap.add_argument("--dim-ff", type=int, default=256)
     ap.add_argument("--dropout", type=float, default=0.1)
+    ap.add_argument("--max-history", type=int, default=0,
+                    help="0 = full available history (default); N > 0 keeps only the N most recent frames "
+                         "(1 = single-frame control with the identical architecture)")
     ap.add_argument("--no-amp", dest="amp", action="store_false")
     ap.add_argument("--no-grad-checkpoint", dest="grad_checkpoint", action="store_false")
     ap.add_argument("--smoke", action="store_true", help="tiny run, never reads the test split")
@@ -150,7 +156,8 @@ def main():
     device = torch.device(args.device)
     os.makedirs(args.out_dir, exist_ok=True)
     os.makedirs(args.checkpoint_dir, exist_ok=True)
-    tag = f"{'smoke_' if args.smoke else ''}img_transformer" + ("" if args.seed == 42 else f"_seed{args.seed}")
+    tag = (f"{'smoke_' if args.smoke else ''}img_transformer" + (f"_k{args.max_history}" if args.max_history > 0 else "")
+           + ("" if args.seed == 42 else f"_seed{args.seed}"))
 
     pairs = load_rows(args.image_pairs, args.cache_dir)
     arr = np.load(os.path.join(args.cache_dir, "images256.npy"))
@@ -170,9 +177,9 @@ def main():
             return pd.concat(parts).reset_index(drop=True)
         tr, va = span(tr, 3), span(va, 1)
         args.max_epochs = 2
-    Htr, Hva = build_histories(tr, cache_idx), build_histories(va, cache_idx)
+    Htr, Hva = build_histories(tr, cache_idx, args.max_history), build_histories(va, cache_idx, args.max_history)
     lens = np.array([len(r) for r in Htr[0]])
-    print(f"Train pairs: history length distribution {dict(zip(*[x.tolist() for x in np.unique(lens, return_counts=True)]))}", flush=True)
+    print(f"max_history = {args.max_history or 'full'} | Train pairs: history length distribution {dict(zip(*[x.tolist() for x in np.unique(lens, return_counts=True)]))}", flush=True)
 
     model = TemporalTransformerUNet(d_model=args.d_model, nhead=args.nhead, num_layers=args.num_layers,
                                     dim_ff=args.dim_ff, dropout=args.dropout, grad_checkpoint=args.grad_checkpoint).to(device)
@@ -214,7 +221,7 @@ def main():
         ev, Hev, label = va, Hva, "SMOKE (val pairs; test not touched)"
     else:
         ev, label = pairs[pairs.split == "test"].reset_index(drop=True), "TEST EVALUATION"
-        Hev = build_histories(ev, cache_idx)
+        Hev = build_histories(ev, cache_idx, args.max_history)
     print(f"=== {label}: {len(ev)} pairs ===", flush=True)
     preds, wts = predict(model, arr, ev, Hev, device)
     res = score_pairs(preds, arr, ev)
