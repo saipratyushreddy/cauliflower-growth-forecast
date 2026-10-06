@@ -948,6 +948,173 @@ on the cleaned pair set, with the stratification above (pooled, per-field,
 with/without day 28; mean and median). This is what catches a future model
 finding a different shortcut.
 
+### Step D: history-aware ConvLSTM (K = 4 frames, with K = 1 reference)
+
+`src/img_convlstm.py`, `src/train_img_convlstm.py`, `sbatch scripts/train_img_convlstm.slurm`
+(K and an optional SEED are passed via `--export`). Step C's shared encoder runs on the last K input
+frames; a ConvLSTM runs over the 8x8x256 bottleneck features, each step FiLM-conditioned on the day
+gap to the *next* frame (for the last frame, the target offset); the final hidden state gets Step C's
+target-offset FiLM; the decoder uses skips from the **last frame only**. Sequences shorter than K are
+left-padded and masked (verified: padded frames have no effect on the output). Same loss, pair set,
+optimizer, augmentation (applied to every frame and the target) and validation-only model selection as
+Step C; test evaluated exactly once per run. 14.1M parameters (Step C: 9.3M). History comes from the
+post-scrub `input_filepaths`.
+
+**Sequence-length pre-check (cleaned pairs).** Median 6 history frames (min 1, max 14); 74% of pairs
+have >= 4 frames, 26% would need padding under K=4 (Field1: 51%; Field1 median is 3 frames, Field2 7).
+**K=4 truncates 65% of pairs** (older history discarded; 3.5 of 6.8 available frames used on average).
+
+| Run | Epochs run | Selected epoch | Best val loss | Val SSIM / PSNR (torch, Gaussian window) | Test structure SSIM / RGB SSIM / PSNR |
+|---|---|---|---|---|---|
+| Step C (single frame) | 73 | 61 | 0.9021 | 0.2734 / 14.66 | 0.0823 / 0.2540 / 14.84 |
+| ConvLSTM K=1 (seed 42) | 75 | 63 | 0.8999 | 0.2748 / 14.65 | 0.0843 / 0.2554 / 14.85 |
+| ConvLSTM K=4 (seed 42) | 77 | 65 | 0.8954 | 0.2773 / 14.69 | 0.0866 / 0.2580 / 14.87 |
+| ConvLSTM K=4 (seed 43, confirmatory) | 62 | 50 | 0.8964 | 0.2765 / 14.75 | 0.0851 / 0.2571 / 14.94 |
+
+All runs overfit mildly (train SSIM ~0.29-0.30 vs val ~0.275-0.277) and plateau on validation around
+epochs 40-60. K=1 and K=4 took ~40 and ~88 minutes.
+
+#### Headline table (test, mean (median)): structure SSIM against Step C, RGB SSIM / PSNR against Control 3
+
+(K=4 = the seed-42 run. Per the protocol, both comparisons always appear together.)
+
+| Subset | Pairs | structure SSIM: Step C | structure SSIM: K=1 | structure SSIM: K=4 | RGB SSIM: Control 3 | RGB SSIM: K=1 | RGB SSIM: K=4 | RGB PSNR dB: Control 3 | RGB PSNR dB: K=1 | RGB PSNR dB: K=4 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| pooled | 1,233 | 0.082 (0.054) | 0.084 (0.055) | 0.087 (0.057) | 0.217 (0.121) | 0.255 (0.161) | 0.258 (0.165) | 14.40 (12.04) | 14.85 (12.42) | 14.87 (12.41) |
+| pooled_excl_f1_day28 | 1,159 | 0.080 (0.054) | 0.083 (0.054) | 0.085 (0.056) | 0.206 (0.117) | 0.244 (0.158) | 0.247 (0.160) | 14.06 (11.74) | 14.44 (12.17) | 14.45 (12.10) |
+| Field1 | 215 | 0.071 (0.050) | 0.070 (0.048) | 0.071 (0.051) | 0.276 (0.231) | 0.304 (0.257) | 0.306 (0.261) | 16.97 (16.09) | 17.76 (16.73) | 17.84 (16.64) |
+| Field1_excl_day28 | 141 | 0.050 (0.048) | 0.048 (0.045) | 0.049 (0.048) | 0.212 (0.231) | 0.238 (0.257) | 0.238 (0.261) | 15.54 (16.09) | 15.91 (16.73) | 15.94 (16.64) |
+| Field1_day28_only | 74 | 0.111 (0.102) | 0.111 (0.105) | 0.114 (0.108) | 0.399 (0.385) | 0.430 (0.424) | 0.434 (0.425) | 19.70 (19.32) | 21.28 (21.17) | 21.46 (20.93) |
+| Field1 target is day28 (bright->dark) | 37 | 0.184 (0.175) | 0.184 (0.178) | 0.184 (0.179) | 0.660 (0.648) | 0.703 (0.701) | 0.703 (0.701) | 25.81 (25.86) | 28.21 (28.18) | 28.20 (28.28) |
+| Field1 input is day28 (dark->bright) | 37 | 0.037 (0.038) | 0.038 (0.043) | 0.044 (0.046) | 0.138 (0.149) | 0.157 (0.171) | 0.165 (0.179) | 13.59 (13.56) | 14.34 (14.54) | 14.73 (14.84) |
+| Field2 | 1,018 | 0.085 (0.056) | 0.087 (0.058) | 0.090 (0.060) | 0.205 (0.110) | 0.245 (0.148) | 0.248 (0.152) | 13.85 (11.56) | 14.24 (11.86) | 14.24 (11.82) |
+
+#### The three explicit comparisons (paired, mean (median) [95% plant-bootstrap CI of the mean], % of pairs where the first is better)
+
+**(1) K=1 vs Step C: architecture alone.**
+
+| Subset | Pairs | Structure SSIM | RGB SSIM | RGB PSNR dB |
+|---|---|---|---|---|
+| pooled | 1,233 | +0.002 (+0.001) [+0.001, +0.003], 56% | +0.001 (+0.001) [+0.001, +0.002], 59% | +0.01 (+0.01) [-0.01, +0.03], 51% |
+| pooled_excl_f1_day28 | 1,159 | +0.002 (+0.002) [+0.002, +0.003], 57% | +0.002 (+0.001) [+0.001, +0.002], 60% | +0.02 (+0.01) [-0.00, +0.03], 52% |
+| Field1 | 215 | -0.001 (-0.001) [-0.002, +0.000], 45% | +0.000 (+0.000) [-0.001, +0.001], 52% | -0.04 (-0.04) [-0.08, -0.01], 43% |
+| Field1_excl_day28 | 141 | -0.002 (-0.001) [-0.003, -0.000], 42% | +0.000 (+0.000) [-0.001, +0.001], 52% | -0.02 (-0.01) [-0.06, +0.01], 48% |
+| Field1_day28_only | 74 | +0.001 (+0.000) [-0.001, +0.002], 50% | -0.000 (+0.000) [-0.001, +0.001], 51% | -0.07 (-0.06) [-0.15, +0.00], 32% |
+| Field1 target is day28 (bright->dark) | 37 | +0.000 (+0.001) [-0.001, +0.002], 59% | +0.000 (+0.000) [-0.000, +0.001], 65% | -0.01 (-0.04) [-0.06, +0.03], 38% |
+| Field1 input is day28 (dark->bright) | 37 | +0.001 (-0.000) [-0.002, +0.003], 41% | -0.000 (-0.002) [-0.003, +0.003], 38% | -0.13 (-0.13) [-0.28, +0.02], 27% |
+| Field2 | 1,018 | +0.003 (+0.002) [+0.002, +0.003], 59% | +0.002 (+0.001) [+0.001, +0.002], 61% | +0.02 (+0.01) [-0.00, +0.04], 52% |
+
+**(2) K=4 vs K=1: history alone, same architecture.**
+
+| Subset | Pairs | Structure SSIM | RGB SSIM | RGB PSNR dB |
+|---|---|---|---|---|
+| pooled | 1,233 | +0.002 (+0.002) [+0.002, +0.003], 61% | +0.003 (+0.002) [+0.002, +0.003], 61% | +0.02 (+0.01) [-0.00, +0.04], 52% |
+| pooled_excl_f1_day28 | 1,159 | +0.002 (+0.002) [+0.002, +0.003], 61% | +0.002 (+0.002) [+0.002, +0.003], 61% | +0.01 (+0.01) [-0.01, +0.03], 51% |
+| Field1 | 215 | +0.002 (+0.001) [+0.001, +0.003], 60% | +0.001 (+0.000) [+0.000, +0.002], 50% | +0.08 (+0.04) [+0.03, +0.13], 57% |
+| Field1_excl_day28 | 141 | +0.001 (+0.001) [-0.000, +0.002], 57% | -0.000 (-0.000) [-0.001, +0.001], 45% | +0.03 (+0.02) [-0.01, +0.07], 52% |
+| Field1_day28_only | 74 | +0.002 (+0.002) [+0.001, +0.004], 65% | +0.004 (+0.001) [+0.002, +0.006], 61% | +0.18 (+0.09) [+0.07, +0.31], 65% |
+| Field1 target is day28 (bright->dark) | 37 | -0.000 (+0.001) [-0.003, +0.002], 59% | -0.000 (-0.001) [-0.001, +0.001], 43% | -0.02 (+0.00) [-0.11, +0.07], 51% |
+| Field1 input is day28 (dark->bright) | 37 | +0.005 (+0.004) [+0.003, +0.008], 70% | +0.008 (+0.004) [+0.005, +0.011], 78% | +0.38 (+0.20) [+0.20, +0.61], 78% |
+| Field2 | 1,018 | +0.003 (+0.002) [+0.002, +0.003], 62% | +0.003 (+0.002) [+0.002, +0.003], 63% | +0.01 (+0.00) [-0.02, +0.03], 51% |
+
+**(3) K=4 vs Step C: combined (headline).**
+
+| Subset | Pairs | Structure SSIM | RGB SSIM | RGB PSNR dB |
+|---|---|---|---|---|
+| pooled | 1,233 | +0.004 (+0.004) [+0.004, +0.005], 65% | +0.004 (+0.003) [+0.003, +0.005], 64% | +0.03 (+0.01) [+0.01, +0.05], 51% |
+| pooled_excl_f1_day28 | 1,159 | +0.004 (+0.004) [+0.004, +0.005], 65% | +0.004 (+0.003) [+0.003, +0.005], 64% | +0.02 (+0.00) [-0.00, +0.05], 51% |
+| Field1 | 215 | +0.001 (+0.001) [-0.000, +0.002], 55% | +0.001 (+0.000) [+0.000, +0.002], 52% | +0.04 (+0.00) [-0.01, +0.09], 51% |
+| Field1_excl_day28 | 141 | -0.000 (-0.001) [-0.002, +0.001], 48% | -0.000 (-0.001) [-0.001, +0.001], 45% | +0.00 (-0.02) [-0.04, +0.05], 47% |
+| Field1_day28_only | 74 | +0.003 (+0.003) [+0.001, +0.005], 69% | +0.004 (+0.002) [+0.002, +0.006], 65% | +0.11 (+0.03) [+0.01, +0.21], 59% |
+| Field1 target is day28 (bright->dark) | 37 | -0.000 (+0.002) [-0.002, +0.002], 59% | +0.000 (-0.000) [-0.001, +0.002], 46% | -0.03 (+0.00) [-0.13, +0.05], 54% |
+| Field1 input is day28 (dark->bright) | 37 | +0.006 (+0.006) [+0.003, +0.009], 78% | +0.007 (+0.005) [+0.004, +0.011], 84% | +0.25 (+0.11) [+0.09, +0.43], 65% |
+| Field2 | 1,018 | +0.005 (+0.005) [+0.004, +0.006], 67% | +0.005 (+0.003) [+0.004, +0.005], 67% | +0.03 (+0.01) [-0.00, +0.05], 51% |
+
+Pooled: structure SSIM 0.082 (Step C) -> 0.084 (K=1) -> 0.087 (K=4): +0.002 from the architecture alone,
++0.002 from history, +0.004 combined (about 5% relative).
+
+#### K=4 minus K=1 by number of history frames the pair has
+
+(1 frame = identical information for K=1 and K=4, so that row is a noise reference.)
+
+| History frames | Pairs | d Structure SSIM mean (median) [95% CI], better | d RGB SSIM | d PSNR dB |
+|---|---|---|---|---|
+| 1 | 110 | +0.004 (+0.004) [+0.003, +0.006], 75% | +0.001 (+0.001) [-0.000, +0.002], 62% | +0.00 (+0.01) [-0.03, +0.03], 52% |
+| 2 | 110 | +0.001 (+0.001) [+0.000, +0.002], 62% | +0.000 (+0.000) [-0.000, +0.001], 55% | +0.01 (-0.00) [-0.03, +0.04], 48% |
+| 3 | 110 | +0.006 (+0.005) [+0.004, +0.007], 75% | +0.009 (+0.007) [+0.007, +0.010], 83% | +0.12 (+0.05) [+0.03, +0.22], 59% |
+| 4-5 | 220 | +0.002 (+0.002) [+0.001, +0.003], 63% | +0.002 (+0.002) [+0.001, +0.003], 62% | +0.05 (+0.04) [+0.00, +0.09], 55% |
+| 6+ | 683 | +0.002 (+0.001) [+0.001, +0.003], 57% | +0.002 (+0.002) [+0.002, +0.003], 58% | -0.00 (+0.00) [-0.03, +0.03], 50% |
+
+No increase with more history (+0.004, +0.001, +0.006, +0.002, +0.002 structure SSIM for 1, 2, 3, 4-5, 6+
+frames).
+
+#### Confirmatory second seed (K=4, seed 43; same architecture and hyperparameters)
+
+(In the tables below, "seed 2" means seed 43; "seed 42" is the original K=4 run. Output files for the
+second seed carry a `_seed43` suffix.)
+
+Seed-to-seed difference (K=4 seed 43 minus seed 42):
+
+| Subset | Pairs | Structure SSIM | RGB SSIM | RGB PSNR dB |
+|---|---|---|---|---|
+| pooled | 1,233 | -0.002 (-0.002) [-0.002, -0.001], 42% | -0.001 (-0.001) [-0.001, -0.000], 45% | +0.07 (+0.05) [+0.05, +0.09], 58% |
+| pooled_excl_f1_day28 | 1,159 | -0.002 (-0.002) [-0.002, -0.001], 42% | -0.001 (-0.001) [-0.001, -0.000], 46% | +0.08 (+0.06) [+0.05, +0.10], 60% |
+| Field1 | 215 | +0.000 (-0.001) [-0.001, +0.001], 46% | -0.001 (-0.001) [-0.002, +0.000], 40% | -0.01 (-0.04) [-0.05, +0.02], 43% |
+| Field1_excl_day28 | 141 | -0.000 (-0.001) [-0.002, +0.001], 44% | -0.001 (-0.001) [-0.002, +0.001], 45% | -0.02 (-0.03) [-0.06, +0.03], 45% |
+| Field1_day28_only | 74 | +0.000 (+0.000) [-0.001, +0.002], 50% | -0.001 (-0.001) [-0.002, -0.001], 32% | -0.01 (-0.04) [-0.06, +0.05], 38% |
+| Field1 target is day28 (bright->dark) | 37 | +0.002 (+0.001) [-0.000, +0.004], 57% | -0.000 (-0.000) [-0.001, +0.001], 46% | -0.05 (-0.05) [-0.12, +0.02], 30% |
+| Field1 input is day28 (dark->bright) | 37 | -0.001 (-0.002) [-0.003, +0.001], 43% | -0.002 (-0.002) [-0.004, -0.001], 19% | +0.04 (-0.04) [-0.02, +0.11], 46% |
+| Field2 | 1,018 | -0.002 (-0.002) [-0.003, -0.001], 41% | -0.001 (-0.001) [-0.002, -0.000], 46% | +0.09 (+0.07) [+0.07, +0.11], 62% |
+| (pairs with 1 history frame) | 110 | -0.000 (+0.001) [-0.002, +0.002] | +0.001 (+0.000) [-0.001, +0.002] | +0.03 (+0.01) [-0.01, +0.06] |
+
+**Is the seed-to-seed difference within the ~0.002-0.004 band seen in the noise-floor check? Yes.** Pooled
+structure SSIM differs by **-0.0016** between the two K=4 runs (0.0851 vs 0.0866); RGB SSIM by -0.001;
+PSNR by +0.07 dB.
+
+The history effect (K=4 minus K=1) for each seed and their average:
+
+| K=4 run | Structure SSIM | RGB SSIM | RGB PSNR dB |
+|---|---|---|---|
+| seed 42 | +0.002 [+0.002, +0.003] | +0.003 [+0.002, +0.003] | +0.02 [-0.00, +0.04] |
+| seed 2 | +0.001 [+0.000, +0.001] | +0.002 [+0.001, +0.002] | +0.09 [+0.07, +0.11] |
+| average of the two seeds | +0.002 [+0.001, +0.002] | +0.002 [+0.002, +0.003] | +0.06 [+0.04, +0.07] |
+
+Protocol check for both K=4 runs:
+
+| K=4 run | d Structure SSIM vs Step C | d RGB SSIM vs Control 3 | d RGB PSNR dB vs Control 3 |
+|---|---|---|---|
+| seed 42 | +0.004 [+0.004, +0.005] | +0.041 [+0.039, +0.042] | +0.47 [+0.42, +0.53] |
+| seed 2 | +0.003 [+0.002, +0.003] | +0.040 [+0.038, +0.041] | +0.54 [+0.50, +0.60] |
+
+#### What this does and does not establish
+
+- **Under this K=4 ConvLSTM design, additional history provides no benefit that can be told apart from
+  training-run noise.** The pooled history effect is +0.002 structure SSIM (seed 42), +0.001 (seed 43),
+  +0.002 on average; the directly measured model-to-model difference is of the same size (-0.0016
+  between two K=4 seeds) and larger when comparing different configurations on pairs with identical
+  input (+0.004, K=4 vs K=1, 1-history-frame pairs). The bootstrap intervals above reflect sampling of
+  test plants only, not training randomness, and two runs cannot estimate seed variance reliably; the
+  honest summary is "same order as the noise", not a proven zero. The effect, if real, is at most ~0.002
+  structure SSIM (~2% relative).
+- **This characterizes THIS encoder / K = 4 design, not history in general.** K=4 discards older history for
+  65% of pairs, half of Field1 is padded, and the history only enters through a recurrent state over
+  bottleneck features. The CNN-Transformer, which conditions on the full available sequence through
+  attention instead of a fixed truncated window, is a materially different and more direct test of whether
+  history helps at all.
+- **Untested hypothesis, flagged under multiple-comparisons caution: history may help when the last frame is
+  uninformative.** On the 37 Field1 pairs whose *input* is the dark, low-contrast day-28 image, K=4 beats K=1
+  by +0.005 structure SSIM (+0.008 RGB SSIM, +0.38 dB; 70-78% of pairs) and Step C by about the same; the
+  second seed shows the same direction (+0.004 structure SSIM, +0.005 RGB SSIM, +0.42 dB vs K=1). The proposed
+  mechanism is that earlier frames (days 15/22) are well exposed while the last frame is dark. This is a
+  post-hoc subset of 37 pairs picked after examining ~120 subset-by-metric cells, not a finding, and it
+  sits close to the noise reference; it should be tested prospectively.
+- **No new shortcut (Control 3 protocol, restated).** Against Control 3, pooled test: K=4 structure SSIM
+  lead +0.037 (Step C: +0.033; K=1: +0.035), RGB SSIM +0.041 / +0.040 (seeds 42 / 43; Step C +0.037),
+  PSNR +0.47 / +0.54 dB (Step C +0.44 dB). The ConvLSTM's gains over Control 3 are essentially Step C's;
+  structure SSIM against Step C is +0.004 / +0.003. Nothing here suggests a different shortcut.
+- **Qualitative (illustration only).** `outputs/img_convlstm_k4_examples.png` shows the same six test pairs as
+  Step C's figure; the K=4 predictions are still smooth colour blobs, visually near-identical to Step C's.
+
 ## Status
 
 **Phase 1 (baselines + CNN-LSTM) complete and verified on Swan:**
