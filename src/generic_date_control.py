@@ -5,7 +5,8 @@ identifying the target DATE rather than from per-plant information.
 For every test pair, the prediction is the pixel-wise MEAN, over all TRAINING plants, of those plants' actual images at the pair's
 (field, target_day) (one image per plant and date; rounded to uint8). It uses no information about the test pair at all except its
 field and target date, and nothing from the test split: the structural analog of Control 2's colour-only transform. Computed for
-ALL test pairs (the 146-pair early Field2 subset, target days 16/22, and everything else), scored ONCE with the standard skimage
+ALL test pairs (the 146-pair early Field2 subset, target days 16/22, and everything else), scored ONCE; a group with fewer than
+--min-train training images (the 3 Field1 day 83->97 test pairs have 7) is still used and flagged thin_group, never dropped with the standard skimage
 RGB SSIM / PSNR + structure SSIM (train_img_single_frame.score_pairs).
 
 Writes <out-dir>/img_ctrl_genericdate_per_pair.csv (+ n_train_images per pair) and a figure of the mean image per early date next
@@ -49,7 +50,7 @@ def main():
     preds, n_img = [], []
     for r in te.itertuples(index=False):
         key = (r.field, r.target_day)
-        assert key in means and counts[key] >= args.min_train, f"no usable training mean for {key} ({counts.get(key, 0)} images)"
+        assert key in means and counts[key] >= 1, f"no training images at all for {key}"
         preds.append(means[key])
         n_img.append(counts[key])
     print(f"Generic-date means built from TRAIN plants only: {len(means)} (field, target_day) groups; training images per group "
@@ -61,6 +62,10 @@ def main():
     print(f"=== TEST EVALUATION (generic-date control): {len(te)} pairs ===", flush=True)
     res = score_pairs(np.stack(preds), arr, te)
     res["n_train_images"] = n_img
+    res["thin_group"] = res["n_train_images"] < args.min_train   # still scored (keeps the identical pair set); flagged
+    thin = res[res.thin_group]
+    print(f"{len(thin)} test pairs use a mean built from fewer than {args.min_train} training images (flagged thin_group): "
+          f"{sorted(thin.pair_id)}", flush=True)
     res.to_csv(os.path.join(args.out_dir, f"{args.tag}img_ctrl_genericdate_per_pair.csv"), index=False)
     print(res[["ssim", "psnr", "structure_ssim"]].agg(["mean", "median"]).round(4).to_string(), flush=True)
     early = ((te.field == "Field2") & te.target_day.isin([16, 22])).values
