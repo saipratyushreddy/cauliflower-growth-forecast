@@ -1252,6 +1252,137 @@ pairs.)
 | 6-9 | 321 | 0.453 | 0.139 | 0.159 | 4.25 | 97% |
 | 10-14 | 362 | 0.583 | 0.085 | 0.093 | 4.01 | 100% |
 
+#### Follow-up diagnostics on the early-Field2 history gain (three explanations tested in sequence)
+
+The Transformer's history gain is concentrated in the 146 early-Field2 test pairs (targets on days 16 and 22; Table E above). Three
+explanations were tested with controls and diagnostics that need no training, in this order; the third result is the strongest evidence
+in the image-prediction track that the Transformer uses genuine per-plant information.
+
+**1. Generic-date image control (`src/generic_date_control.py`, `src/compare_generic_date.py`): ruled out.** The prediction is the pixel-wise
+mean of the TRAINING plants' real images at the pair's (field, target day) (344 images for Field2 days 16 and 22; it uses nothing about the
+test pair except its field and date; scored once on all 1,233 test pairs; three Field1 day-97 pairs use a 7-image mean and are flagged
+`thin_group`, none are in this subset). Early Field2 subset, test, mean (median):
+
+| Method | Structure SSIM | RGB SSIM | RGB PSNR dB |
+|---|---|---|---|
+| Copy-forward | 0.1459 (0.0791) | 0.390 (0.327) | 13.83 (14.12) |
+| C1 blur | 0.1133 (0.0917) | 0.418 (0.412) | 14.02 (14.26) |
+| C2 flight-colour | 0.1588 (0.0921) | 0.440 (0.393) | 20.82 (19.89) |
+| C3 colour+blur | 0.1103 (0.0874) | 0.480 (0.469) | 22.34 (21.95) |
+| Generic-date mean image | 0.1004 (0.0896) | 0.482 (0.473) | 22.35 (22.49) |
+| Step C | 0.2167 (0.1489) | 0.547 (0.511) | 23.86 (23.16) |
+| ConvLSTM K=1 | 0.2151 (0.1498) | 0.547 (0.514) | 23.91 (23.12) |
+| ConvLSTM K=4 (s42) | 0.2189 (0.1568) | 0.552 (0.519) | 23.91 (23.24) |
+| ConvLSTM K=4 (s43) | 0.2196 (0.1554) | 0.549 (0.511) | 23.97 (23.11) |
+| Transformer K=1 | 0.2137 (0.1466) | 0.545 (0.510) | 23.80 (23.12) |
+| Transformer (full) | 0.2297 (0.1573) | 0.560 (0.522) | 23.99 (23.49) |
+
+Structure SSIM differences on the subset, mean (median) [95% plant-bootstrap CI], % first better:
+
+| Comparison | mean (median) [95% plant-bootstrap CI], % first better |
+|---|---|
+| Generic-date minus Transformer K=1 | -0.1133 (-0.1076) [-0.1187, -0.1081], 0% |
+| Transformer minus Transformer K=1 | +0.0160 (+0.0141) [+0.0143, +0.0178], 97% |
+| Transformer minus Generic-date | +0.1292 (+0.1228) [+0.1236, +0.1353], 100% |
+| Generic-date minus ConvLSTM K=4 (s42) | -0.1185 (-0.1153) [-0.1241, -0.1131], 0% |
+| Generic-date minus Step C | -0.1163 (-0.1174) [-0.1216, -0.1110], 0% |
+| Generic-date minus C1 (blur) | -0.0129 (-0.0120) [-0.0149, -0.0108], 16% |
+| Generic-date minus C3 (colour+blur) | -0.0099 (-0.0098) [-0.0119, -0.0079], 25% |
+| Generic-date minus copy-forward | -0.0455 (-0.0290) [-0.0515, -0.0401], 8% |
+| SHARE of the (Transformer - Transformer K=1) gap reproduced by the generic-date control | -7.09  [-8.04, -6.30]  (generic-K1 = -0.1133; Transformer-K1 = +0.0160) |
+
+The generic-date image scores 0.100 structure SSIM here (0.040 on all test pairs), below copy-forward (0.146) and far below the
+single-frame Transformer (0.214); it reproduces none of the +0.016 history gap (share reproduced -7.1 [-8.0, -6.3]). Its RGB SSIM and
+PSNR on this subset equal Control 3's (0.482 vs 0.480; 22.35 vs 22.34 dB): the colour and exposure of these dates is fully predictable from
+the date alone, but the Transformer's extra structure SSIM sits on top of that.
+
+**2. Oracle colour-match diagnostic (`src/oracle_colormatch_transformer.py`): exposure-only explanation ruled out.** DIAGNOSTIC ONLY, NOT
+achievable at inference: each prediction of the full and single-frame Transformer is shifted/scaled per channel to its OWN TARGET's mean and
+std (the Step B oracle transform), then re-scored. Integrity check: the recomputed original scores match the saved per-pair CSVs (max
+difference 1.7e-4 and 2.4e-4). Early Field2 subset (n=146):
+
+| Metric | Model | before colour-matching | after colour-matching (mean+std; PRIMARY) | after mean-only match (supplementary) |
+|---|---|---|---|---|
+| structure_ssim | Transformer K=1 | 0.2137 (0.1466) | 0.2021 (0.1349) | 0.2137 (0.1470) |
+| structure_ssim | Transformer (full) | 0.2297 (0.1573) | 0.2179 (0.1448) | 0.2297 (0.1576) |
+| ssim | Transformer K=1 | 0.545 (0.510) | 0.538 (0.498) | 0.545 (0.510) |
+| ssim | Transformer (full) | 0.560 (0.522) | 0.554 (0.509) | 0.560 (0.522) |
+| psnr | Transformer K=1 | 23.80 (23.12) | 23.07 (22.11) | 23.95 (23.25) |
+| psnr | Transformer (full) | 23.99 (23.49) | 23.38 (22.47) | 24.13 (23.51) |
+
+| Gap (Transformer full minus Transformer K=1) | before | after mean+std (PRIMARY) | share remaining | after mean-only (supplementary) | share remaining |
+|---|---|---|---|---|---|
+| structure_ssim | +0.0160 [+0.0143, +0.0178], 97% | +0.0159 [+0.0141, +0.0178], 93% | 0.99 [0.97, 1.01] | +0.0161 [+0.0143, +0.0179], 97% | 1.01 [1.00, 1.01] |
+| ssim | +0.0156 [+0.0141, +0.0170], 96% | +0.0156 [+0.0141, +0.0172], 89% | 1.01 [0.97, 1.04] | +0.0154 [+0.0140, +0.0169], 96% | 0.99 [0.98, 1.00] |
+| psnr | +0.187 [+0.130, +0.247], 77% | +0.304 [+0.255, +0.355], 91% | 1.62 [1.31, 2.13] | +0.184 [+0.141, +0.229], 84% | 0.98 [0.81, 1.23] |
+
+The structure SSIM gap is +0.0160 before and +0.0159 after the mean+std match (share remaining 0.99 [0.97, 1.01]; 1.01 with a mean-only match),
+and the same on the other 1,087 pairs (+0.0038 -> +0.0037). Exposure does not explain the concentration. (The mean+std match itself lowers both
+models' structure SSIM, 0.2137 -> 0.2021 for K=1 and 0.2297 -> 0.2179 for the full model, because it stretches smooth predictions' contrast; the
+mean-only match, which removes brightness offsets without that stretch, leaves structure SSIM unchanged and raises PSNR ~0.15 dB for both, so both
+models' brightness offsets are small and equal here.) The PSNR gap grows to +0.304 dB after the mean+std match, which I read as that
+stretching artifact, not exposure; with the mean-only match it is +0.184 (0.98 remaining).
+
+**3. Swapped-history test (`src/swapped_history_test.py`): the gain depends on the plant's own earlier frames.** Inference only, saved checkpoints.
+For the 146 pairs, every EARLIER input frame (day 1 for target-16 pairs; days 1 and 8 for target-22 pairs) is replaced by the frame of a DIFFERENT
+plant of the same field at the same acquisition date (time offsets and conditioning unchanged); the last input frame and the target stay the
+plant's own. Donors are other TEST plants (never seen in training), one donor per (plant, draw), 5 random draws; 0 of 146 pairs excluded (72 donor
+candidates per plant). Integrity: original-history scores match the saved CSVs (max difference 1.2e-4 and 8.3e-5); K=1 reads only the last frame and
+its scores are identical under the swap (difference exactly 0).
+
+| Arm | Structure SSIM | RGB SSIM | PSNR |
+|---|---|---|---|
+| Transformer K=1 (single frame) | 0.2137 | 0.5447 | 23.804 |
+| Transformer, original history | 0.2297 | 0.5602 | 23.991 |
+| Transformer, SWAPPED history (mean over draws) | 0.1831 | 0.4984 | 22.429 |
+| (supplementary) Transformer, earlier frames = copies of own last frame | 0.1865 | 0.5004 | 21.444 |
+
+Gap (Transformer minus its own K=1 control) on the subset; mean [95% plant-bootstrap CI], % pairs better:
+
+| Arm | Structure SSIM | RGB SSIM | PSNR dB | share of the original structure-SSIM gap |
+|---|---|---|---|---|
+| (a) original history | +0.0160 [+0.0143, +0.0178], 97% | +0.0156 [+0.0141, +0.0170], 96% | +0.187 [+0.130, +0.247], 77% | 1.00 [1.00, 1.00] |
+| (b) swapped history, draw 1 | -0.0315 [-0.0348, -0.0283], 8% | -0.0475 [-0.0521, -0.0429], 11% | -1.382 [-1.545, -1.215], 10% | -1.97 [-2.32, -1.68] |
+| (b) swapped history, draw 2 | -0.0312 [-0.0347, -0.0281], 3% | -0.0478 [-0.0525, -0.0434], 7% | -1.449 [-1.640, -1.262], 14% | -1.95 [-2.30, -1.66] |
+| (b) swapped history, draw 3 | -0.0289 [-0.0317, -0.0260], 5% | -0.0434 [-0.0471, -0.0395], 8% | -1.286 [-1.451, -1.120], 14% | -1.81 [-2.11, -1.53] |
+| (b) swapped history, draw 4 | -0.0304 [-0.0336, -0.0272], 6% | -0.0445 [-0.0489, -0.0402], 7% | -1.256 [-1.453, -1.065], 16% | -1.90 [-2.25, -1.60] |
+| (b) swapped history, draw 5 | -0.0312 [-0.0338, -0.0287], 4% | -0.0482 [-0.0517, -0.0447], 6% | -1.500 [-1.661, -1.326], 14% | -1.95 [-2.26, -1.68] |
+| (b) swapped history, mean over draws | -0.0306 [-0.0329, -0.0285], 1% | -0.0463 [-0.0490, -0.0435], 3% | -1.375 [-1.484, -1.260], 8% | -1.92 [-2.21, -1.66] |
+| (c, supplementary) earlier frames = own last frame | -0.0272 [-0.0294, -0.0250], 9% | -0.0443 [-0.0469, -0.0418], 5% | -2.360 [-2.515, -2.207], 1% | -1.70 [-1.97, -1.45] |
+
+Swapped minus original history, same pairs:
+
+| Metric | swapped (mean over draws) - original |
+|---|---|
+| structure_ssim | -0.0466 [-0.0491, -0.0442], 0% |
+| ssim | -0.0618 [-0.0647, -0.0590], 0% |
+| psnr | -1.562 [-1.668, -1.457], 1% |
+
+Plainly: with another plant's earlier frames the Transformer's gap over the single-frame control goes from **+0.0160 to -0.0306 structure SSIM**
+[-0.0329, -0.0285] (the five draws agree, -0.029 to -0.032): the full-history model is then **worse than the single-frame model**, not merely no better,
+losing 0.047 structure SSIM and 1.6 dB against its own original-history score. Replacing the earlier frames by copies of the plant's own last frame
+(supplementary arm; offsets unchanged, but out of distribution) gives -0.0272. The mean attention weight on the last frame is identical under
+the swap (0.530 vs 0.530), so attention follows offsets and history length, not frame content.
+
+**What this establishes, stated explicitly.** This is the strongest evidence in the image-prediction track that the Transformer uses genuine
+per-plant information. Three explanations of the early-Field2 history gain have now been tested and ruled out in sequence: a generic "plant at this
+date" image (step 1), an exposure-only effect (step 2), and offset / date identification (step 3: offsets are identical in both manipulations, yet
+the gain collapses). The per-plant-content explanation is what remains standing after those eliminations, not merely the last untested option. The
+test also bears on the earlier history claims: the early-Field2 history benefit is plant-specific, not a date or offset shortcut.
+
+**Fragility, stated plainly.** The model is not robust to inconsistent history: given another plant's frames at the right offsets it falls 0.031
+structure SSIM below the single-frame model. Any use of the history benefit has to treat the history as load-bearing and fragile.
+
+**What it does not establish.** (i) That the dependence is informative GROWTH content: the gap going negative shows the decoder's pooled maps are
+corrupted by misaligned wrong-plant content, i.e. dependence, not that the information used is growth-relevant. Plant-specific growth cues and aligned
+multi-frame averaging / early-season layout (plant position is stable between days 1 and 16) both remain possible and untested. (ii) That the
+supplementary arm isolates offsets: it is out of distribution for the trained model. (iii) Anything outside the 146 pairs (below).
+
+**Named follow-up (not just a caveat): repeat the swapped-history test beyond early-season Field2.** The swap test was run only on the 146-pair
+early-Field2 subset. Whether the pooled +0.005 history effect elsewhere in the dataset (the 1,087 other test pairs, where the Transformer's history
+effect is +0.0038, close to the +0.003 identical-input training-noise reference) shows the same plant-specific dependence is untested. It is the
+natural next check if this finding needs to generalize beyond early-season Field2.
+
 #### What the Transformer stage does and does not establish
 
 - **Noise-floor framing, stated plainly: each adjacent step in the ordering is within or near measured training noise.** Pooled
@@ -1266,14 +1397,14 @@ pairs.)
   0.8935 vs 0.8999 -> 0.8954 for the ConvLSTM). By history length the effect is not monotone (+0.003, +0.007, +0.017, +0.004, +0.002,
   +0.005 for 1, 2, 3, 4-5, 6-9, 10-14 frames): it is concentrated in the 2- and 3-frame pairs, which are exactly the early-season Field2
   pairs below. Outside those, the Transformer's history effect (+0.0038) is about the identical-input reference (+0.003).
-- **Named, specific hypothesis, untested: early-season Field2 pairs (targets on days 16 and 22; 12% of test pairs) benefit from attention
-  over history.** On these 146 pairs the Transformer beats its single-frame control by +0.016 [+0.014, +0.018] and the ConvLSTM K=4 by
-  +0.011 / +0.010 (two seeds), versus +0.004 and -0.000 / +0.002 on the other 88%: they supply about 36% of the Transformer's pooled history
-  effect. The ConvLSTM K=4 gains less there (+0.004 over K=1). Candidate mechanisms, none tested: (a) at these early, dim, low-contrast
-  flights the last frame is uninformative and earlier frames (days 1, 8) are not, the same idea as the untested day-28-input hypothesis
-  above; (b) the offsets to every earlier frame reveal the absolute target date, hence its flight-specific exposure, which a single frame
-  plus one gap only implies; (c) early-season targets are low-contrast, so structure SSIM is easy to score there (see the contrast check
-  above). This concentration was observed after looking at many subsets, so it is a hypothesis for future work, not a finding.
+- **Early-season Field2 concentration: observed, and what has been ruled out.** On the 146 early-Field2 pairs (targets on days 16 and 22; 12% of test
+  pairs) the Transformer beats its single-frame control by +0.016 [+0.014, +0.018] and the ConvLSTM K=4 by +0.011 / +0.010 (two seeds), versus +0.004 and
+  -0.000 / +0.002 on the other 88%: they supply about 36% of the Transformer's pooled history effect. The ConvLSTM K=4 gains less there (+0.004 over K=1).
+  Tested in sequence (see the follow-up diagnostics above): a generic-date image (ruled out), an exposure-only effect (ruled out) and offset / date
+  identification (ruled out); the gain collapses when the plant's earlier frames are swapped for another plant's, so it depends on this plant's own history.
+  Still untested: whether the information used is growth-relevant or aligned multi-frame averaging / early-season layout, and whether the pooled +0.005
+  elsewhere shows the same dependence (the named follow-up). The concentration was first observed after looking at many subsets, which is why it was tested
+  rather than assumed.
 - **Attention is recency-dominant plus diffuse averaging, not selective retrieval.** For histories of 6+ frames the largest weight is on the
   last frame in 97-100% of pairs (weight 0.45-0.58 vs a uniform 0.09-0.14), while the oldest frame gets about its uniform share (0.159 vs
   0.139; 0.093 vs 0.085); the effective number of frames used is ~4 even for 10-14-frame histories. Caveat: only the first, last and
@@ -1286,7 +1417,8 @@ pairs.)
   best model, structure SSIM rises from 0.082 to 0.088 (+0.006, ~7% relative). The gain from using history is real in direction (+0.002 for
   the ConvLSTM, +0.005 for the Transformer) but concentrated in specific flights (early-season Field2) rather than a general benefit of
   history; outside them the Transformer is indistinguishable from the ConvLSTM K=4 (-0.000 against seed 42, +0.002 against seed 43). All
-  outputs remain smooth colour blobs (structure SSIM ~0.09, median ~0.056).
+  outputs remain smooth colour blobs (structure SSIM ~0.09, median ~0.056). The history benefit that does exist (early-season Field2) depends on the plant's own earlier frames (swapped-history
+  test) and the model degrades below the single-frame baseline when history is inconsistent.
 
 ## Status
 
