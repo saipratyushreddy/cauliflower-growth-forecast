@@ -1100,7 +1100,8 @@ Protocol check for both K=4 runs:
   65% of pairs, half of Field1 is padded, and the history only enters through a recurrent state over
   bottleneck features. The CNN-Transformer, which conditions on the full available sequence through
   attention instead of a fixed truncated window, is a materially different and more direct test of whether
-  history helps at all.
+  history helps at all. (Result: see Step E below; its single-frame control found a larger history effect for the
+  Transformer, concentrated in early-season Field2 flights.)
 - **Untested hypothesis, flagged under multiple-comparisons caution: history may help when the last frame is
   uninformative.** On the 37 Field1 pairs whose *input* is the dark, low-contrast day-28 image, K=4 beats K=1
   by +0.005 structure SSIM (+0.008 RGB SSIM, +0.38 dB; 70-78% of pairs) and Step C by about the same; the
@@ -1114,6 +1115,178 @@ Protocol check for both K=4 runs:
   structure SSIM against Step C is +0.004 / +0.003. Nothing here suggests a different shortcut.
 - **Qualitative (illustration only).** `outputs/img_convlstm_k4_examples.png` shows the same six test pairs as
   Step C's figure; the K=4 predictions are still smooth colour blobs, visually near-identical to Step C's.
+
+### Step E: CNN-Transformer over the full history, with a single-frame control
+
+`src/img_transformer.py`, `src/train_img_transformer.py`, `sbatch scripts/train_img_transformer.slurm`
+(`--max-history 1` / `MAXHIST=1` gives the single-frame control with the identical architecture). **One token per
+frame** (global average of the shared Step C / ConvLSTM bottleneck, LayerNorm, projection to d_model = 128; not
+spatial-patch tokens). **Time encoding per token: a fixed continuous sinusoidal encoding of (target_day - input_day)**, not
+day_after_planting, plus a learned output token at offset 0. Standard 2-layer, 4-head Transformer encoder (dropout 0.1, one
+untuned configuration, 9.7M parameters in total) over the **full available history, variable length (up to 14 frames; the
+real maximum is 14, not 13), with a padding mask; no K truncation**. An attention-pooling step (output token as query) gives
+weights over frames, and the decoder's bottleneck **and all five skip connections are the attention-weighted combination of
+every frame's feature maps** (Step C / ConvLSTM take skips from the last frame only, the one design element that had to
+differ). Frames are encoded only where real, under activation checkpointing. Same L1 + SSIM loss, pair set, optimizer,
+augmentation, validation-only selection and single test evaluation as before. Masking verified at both extremes in a mixed
+batch of 1-, 2- and 14-frame samples (weights sum to 1, exactly 0 on padding, a 1-frame sample is identical alone or
+batched, extra padding changes nothing).
+
+**Time-encoding aliasing check (before any training; `src/pe_aliasing_check.py`).** Real range of target_day - input_day
+over all (pair, frame): 2-84 days, 60 distinct values. The Phase 0 setting (standard sinusoid, 64 dims, base 10000) does
+**not** transfer: 77 of 83 anchor values have a non-monotone similarity profile (max rise 0.078), and it compresses every
+distance into a narrow band (cos(84, 15) = 0.45, cos(84, 22) = 0.46, cos(84, 64) = 0.59). Used instead: a geometric frequency
+set, 128 dims, wavelengths 16-1000 days: worst non-monotone rise 0.0009 and 2 ordering violations of 0.0007-0.0022 cosine;
+mean cosine falls smoothly from 0.99 (1 day apart) to 0.06 (80 days apart).
+
+| Run | Epochs run | Selected epoch | Best val loss | Val SSIM / PSNR | Test structure SSIM / RGB SSIM / PSNR | Time |
+|---|---|---|---|---|---|---|
+| Transformer K=1 (single frame, same architecture) | 68 | 56 | 0.9013 | 0.2741 / 14.63 | 0.0827 / 0.2540 / 14.81 | 66 min |
+| Transformer (full history) | 62 | 50 | 0.8935 | 0.2784 / 14.77 | 0.0879 / 0.2594 / 14.96 | 3 h 18 min |
+
+(Reference validation losses: Step C 0.9021, ConvLSTM K=1 0.8999, ConvLSTM K=4 0.8954 / 0.8964.) Both overfit mildly like earlier
+stages (full-history train SSIM 0.299 vs val 0.278).
+
+#### Full comparison, structure SSIM as the primary metric (test, mean (median))
+
+| Subset | Pairs | Step C | ConvLSTM K=1 | ConvLSTM K=4 (s42) | ConvLSTM K=4 (s43) | Transformer K=1 | Transformer (full) |
+|---|---|---|---|---|---|---|---|
+| pooled | 1,233 | 0.082 (0.054) | 0.084 (0.055) | 0.087 (0.057) | 0.085 (0.057) | 0.083 (0.053) | 0.088 (0.056) |
+| pooled_excl_f1_day28 | 1,159 | 0.080 (0.054) | 0.083 (0.054) | 0.085 (0.056) | 0.083 (0.056) | 0.081 (0.053) | 0.086 (0.055) |
+| Field1 | 215 | 0.071 (0.050) | 0.070 (0.048) | 0.071 (0.051) | 0.071 (0.050) | 0.068 (0.045) | 0.070 (0.048) |
+| Field1_excl_day28 | 141 | 0.050 (0.048) | 0.048 (0.045) | 0.049 (0.048) | 0.049 (0.047) | 0.046 (0.042) | 0.047 (0.045) |
+| Field1_day28_only | 74 | 0.111 (0.102) | 0.111 (0.105) | 0.114 (0.108) | 0.114 (0.105) | 0.110 (0.104) | 0.114 (0.105) |
+| Field1 target is day28 (bright->dark) | 37 | 0.184 (0.175) | 0.184 (0.178) | 0.184 (0.179) | 0.186 (0.180) | 0.183 (0.176) | 0.185 (0.177) |
+| Field1 input is day28 (dark->bright) | 37 | 0.037 (0.038) | 0.038 (0.043) | 0.044 (0.046) | 0.043 (0.044) | 0.036 (0.043) | 0.043 (0.046) |
+| Field2 | 1,018 | 0.085 (0.056) | 0.087 (0.058) | 0.090 (0.060) | 0.088 (0.059) | 0.086 (0.056) | 0.092 (0.060) |
+
+#### Protocol table (pooled test): structure SSIM against Step C, RGB SSIM and PSNR against Control 3, in one table
+
+| Model | Structure SSIM | d vs Step C | RGB SSIM | d vs Control 3 | PSNR dB | d vs Control 3 |
+|---|---|---|---|---|---|---|
+| Control 3 | 0.0494 |  | 0.2173 |  | 14.40 |  |
+| Step C | 0.0823 |  | 0.2540 | +0.0367 | 14.84 | +0.44 |
+| ConvLSTM K=1 | 0.0843 | +0.0020 | 0.2554 | +0.0381 | 14.85 | +0.45 |
+| ConvLSTM K=4 (s42) | 0.0866 | +0.0044 | 0.2580 | +0.0407 | 14.87 | +0.47 |
+| ConvLSTM K=4 (s43) | 0.0851 | +0.0028 | 0.2571 | +0.0397 | 14.94 | +0.54 |
+| Transformer K=1 | 0.0827 | +0.0004 | 0.2540 | +0.0367 | 14.81 | +0.41 |
+| Transformer (full) | 0.0879 | +0.0056 | 0.2594 | +0.0420 | 14.96 | +0.56 |
+
+#### The three-way decomposition for the Transformer (paired, mean (median) [95% plant-bootstrap CI], % of pairs where the first is better)
+
+**(1) Transformer K=1 vs Step C: architecture alone.**
+
+| Subset | Pairs | Structure SSIM | RGB SSIM | RGB PSNR dB |
+|---|---|---|---|---|
+| pooled | 1,233 | +0.000 (-0.000) [-0.000, +0.001], 50% | +0.000 (+0.000) [-0.000, +0.000], 53% | -0.03 (-0.03) [-0.05, -0.01], 46% |
+| pooled_excl_f1_day28 | 1,159 | +0.000 (+0.000) [-0.000, +0.001], 50% | +0.000 (+0.000) [-0.000, +0.001], 54% | -0.02 (-0.02) [-0.04, -0.01], 47% |
+| Field1 | 215 | -0.003 (-0.002) [-0.004, -0.002], 33% | -0.001 (-0.001) [-0.002, -0.000], 40% | -0.11 (-0.10) [-0.14, -0.08], 32% |
+| Field1_excl_day28 | 141 | -0.004 (-0.003) [-0.005, -0.002], 30% | -0.002 (-0.002) [-0.003, -0.000], 38% | -0.12 (-0.10) [-0.15, -0.09], 30% |
+| Field1_day28_only | 74 | -0.001 (-0.001) [-0.002, -0.000], 41% | -0.001 (-0.000) [-0.002, +0.000], 46% | -0.10 (-0.08) [-0.19, -0.03], 36% |
+| Field1 target is day28 (bright->dark) | 37 | -0.001 (-0.001) [-0.002, +0.000], 46% | +0.000 (+0.000) [-0.001, +0.001], 57% | -0.07 (-0.05) [-0.17, +0.01], 38% |
+| Field1 input is day28 (dark->bright) | 37 | -0.001 (-0.002) [-0.003, +0.001], 35% | -0.002 (-0.002) [-0.004, +0.001], 35% | -0.13 (-0.18) [-0.27, +0.00], 35% |
+| Field2 | 1,018 | +0.001 (+0.001) [+0.000, +0.002], 53% | +0.000 (+0.001) [-0.000, +0.001], 56% | -0.01 (-0.01) [-0.03, +0.01], 49% |
+
+**(2) Transformer (full) vs Transformer K=1: history alone, same architecture.**
+
+| Subset | Pairs | Structure SSIM | RGB SSIM | RGB PSNR dB |
+|---|---|---|---|---|
+| pooled | 1,233 | +0.005 (+0.005) [+0.005, +0.006], 68% | +0.005 (+0.003) [+0.005, +0.006], 71% | +0.15 (+0.09) [+0.13, +0.17], 66% |
+| pooled_excl_f1_day28 | 1,159 | +0.005 (+0.005) [+0.005, +0.006], 67% | +0.005 (+0.004) [+0.005, +0.006], 71% | +0.14 (+0.10) [+0.12, +0.17], 66% |
+| Field1 | 215 | +0.002 (+0.002) [+0.001, +0.003], 61% | +0.002 (+0.001) [+0.001, +0.003], 60% | +0.13 (+0.05) [+0.08, +0.18], 62% |
+| Field1_excl_day28 | 141 | +0.001 (+0.001) [-0.000, +0.003], 53% | +0.000 (+0.000) [-0.001, +0.001], 55% | +0.08 (+0.06) [+0.05, +0.11], 64% |
+| Field1_day28_only | 74 | +0.004 (+0.003) [+0.003, +0.006], 76% | +0.004 (+0.001) [+0.003, +0.007], 70% | +0.22 (+0.05) [+0.10, +0.35], 59% |
+| Field1 target is day28 (bright->dark) | 37 | +0.002 (+0.002) [+0.001, +0.004], 76% | +0.000 (+0.000) [-0.001, +0.001], 54% | +0.04 (-0.01) [-0.04, +0.14], 49% |
+| Field1 input is day28 (dark->bright) | 37 | +0.006 (+0.004) [+0.004, +0.010], 76% | +0.009 (+0.005) [+0.005, +0.013], 86% | +0.40 (+0.19) [+0.18, +0.66], 70% |
+| Field2 | 1,018 | +0.006 (+0.005) [+0.005, +0.007], 69% | +0.006 (+0.004) [+0.006, +0.007], 74% | +0.15 (+0.10) [+0.13, +0.18], 67% |
+
+**(3) Transformer (full) vs Step C: combined.**
+
+| Subset | Pairs | Structure SSIM | RGB SSIM | RGB PSNR dB |
+|---|---|---|---|---|
+| pooled | 1,233 | +0.006 (+0.005) [+0.005, +0.006], 69% | +0.005 (+0.004) [+0.005, +0.006], 71% | +0.12 (+0.09) [+0.10, +0.14], 62% |
+| pooled_excl_f1_day28 | 1,159 | +0.006 (+0.005) [+0.005, +0.006], 69% | +0.005 (+0.004) [+0.005, +0.006], 72% | +0.12 (+0.09) [+0.10, +0.14], 62% |
+| Field1 | 215 | -0.001 (-0.000) [-0.002, +0.001], 48% | +0.000 (+0.000) [-0.001, +0.001], 50% | +0.02 (-0.03) [-0.03, +0.06], 44% |
+| Field1_excl_day28 | 141 | -0.003 (-0.003) [-0.004, -0.001], 38% | -0.002 (-0.001) [-0.003, -0.000], 43% | -0.04 (-0.04) [-0.08, +0.01], 40% |
+| Field1_day28_only | 74 | +0.003 (+0.002) [+0.002, +0.005], 69% | +0.004 (+0.001) [+0.002, +0.005], 64% | +0.12 (+0.02) [+0.03, +0.21], 51% |
+| Field1 target is day28 (bright->dark) | 37 | +0.001 (+0.001) [+0.000, +0.003], 59% | +0.000 (+0.000) [+0.000, +0.001], 57% | -0.04 (-0.07) [-0.09, +0.01], 41% |
+| Field1 input is day28 (dark->bright) | 37 | +0.005 (+0.005) [+0.003, +0.007], 78% | +0.007 (+0.004) [+0.004, +0.010], 70% | +0.27 (+0.11) [+0.09, +0.46], 62% |
+| Field2 | 1,018 | +0.007 (+0.006) [+0.006, +0.008], 73% | +0.006 (+0.005) [+0.006, +0.007], 76% | +0.14 (+0.11) [+0.12, +0.17], 66% |
+
+Pooled: the architecture alone changes nothing (+0.000 structure SSIM; slightly worse on Field1, -0.003); history adds +0.005; combined
++0.006 (about 7% relative to Step C). For comparison, the ConvLSTM's history effect (K=4 minus K=1) was +0.002 and +0.001 for the two
+seeds.
+
+#### Transformer minus Transformer K=1 by number of history frames
+
+(The 1-frame row has identical information and identical architecture, so it is a training-noise reference: +0.003 structure SSIM on 110
+pairs.)
+
+| History frames | Pairs | d Structure SSIM | d RGB SSIM | d PSNR dB |
+|---|---|---|---|---|
+| 1 | 110 | +0.003 (+0.003) [+0.001, +0.005], 64% | +0.000 (+0.001) [-0.001, +0.001], 61% | +0.08 (+0.08) [+0.05, +0.12], 69% |
+| 2 | 110 | +0.007 (+0.006) [+0.006, +0.009], 89% | +0.002 (+0.002) [+0.001, +0.002], 80% | +0.12 (+0.09) [+0.08, +0.17], 75% |
+| 3 | 110 | +0.017 (+0.016) [+0.014, +0.019], 91% | +0.022 (+0.023) [+0.019, +0.025], 95% | +0.27 (+0.12) [+0.17, +0.39], 67% |
+| 4-5 | 220 | +0.004 (+0.004) [+0.003, +0.005], 64% | +0.005 (+0.005) [+0.004, +0.007], 74% | +0.16 (+0.14) [+0.11, +0.20], 71% |
+| 6-9 | 321 | +0.002 (+0.002) [+0.001, +0.003], 56% | +0.002 (+0.002) [+0.001, +0.003], 61% | +0.01 (+0.02) [-0.03, +0.06], 52% |
+| 10-14 | 362 | +0.005 (+0.005) [+0.004, +0.006], 68% | +0.006 (+0.006) [+0.005, +0.007], 73% | +0.25 (+0.18) [+0.20, +0.31], 71% |
+
+#### Early-season Field2 targets (days 16, 22; 146 test pairs) vs all other test pairs: structure SSIM differences, mean [95% CI]
+
+| Comparison | Early Field2 (n=146) | All other (n=1087) |
+|---|---|---|
+| Transformer - Transformer K=1 | +0.0160 [+0.0143, +0.0178] | +0.0038 [+0.0031, +0.0045] |
+| Transformer - ConvLSTM K=4 (s42) | +0.0108 [+0.0094, +0.0121] | -0.0001 [-0.0007, +0.0006] |
+| Transformer - ConvLSTM K=4 (s43) | +0.0100 [+0.0086, +0.0117] | +0.0018 [+0.0012, +0.0024] |
+| ConvLSTM K=4 (s42) - ConvLSTM K=1 | +0.0038 [+0.0027, +0.0049] | +0.0022 [+0.0016, +0.0027] |
+| Transformer K=1 - Step C | -0.0030 [-0.0039, -0.0021] | +0.0008 [+0.0002, +0.0014] |
+
+#### Attention over history (test)
+
+| History frames | Pairs | Weight on last frame | Uniform 1/n | Weight on oldest frame | Effective frames used | Largest weight on last frame |
+|---|---|---|---|---|---|---|
+| 1 | 110 | 1.000 | 1.000 | 1.000 | 1.00 | 100% |
+| 2 | 110 | 0.773 | 0.500 | 0.227 | 1.66 | 100% |
+| 3 | 110 | 0.370 | 0.333 | 0.326 | 2.98 | 70% |
+| 4-5 | 220 | 0.462 | 0.225 | 0.190 | 3.67 | 74% |
+| 6-9 | 321 | 0.453 | 0.139 | 0.159 | 4.25 | 97% |
+| 10-14 | 362 | 0.583 | 0.085 | 0.093 | 4.01 | 100% |
+
+#### What the Transformer stage does and does not establish
+
+- **Noise-floor framing, stated plainly: each adjacent step in the ordering is within or near measured training noise.** Pooled
+  structure SSIM: Step C 0.0823, Transformer K=1 0.0827, ConvLSTM K=1 0.0843, ConvLSTM K=4 0.0851 / 0.0866 (two seeds), Transformer
+  0.0879. The seed-to-seed difference between two identical K=4 runs was 0.0016 and the identical-input reference above is +0.003, so
+  the individual steps (+0.0004, +0.002, +0.002, +0.001 to +0.003) are of that size. Only the cumulative separation is larger:
+  the three runs that use history (ConvLSTM K=4 x2, Transformer) all sit above the three that do not (Step C, ConvLSTM K=1, Transformer
+  K=1), by +0.0034 on average (0.0865 vs 0.0831, ~4% relative), although the closest pair differs by only 0.0008 and the runs are single
+  seeds (two for K=4). Bootstrap intervals cover test-plant sampling only, not training randomness.
+- **The Transformer's own history effect (+0.005 structure SSIM, [+0.005, +0.006]) is the largest of the history effects measured
+  and exceeds both noise references, but it is not general.** Validation shows the same direction and a larger gap (val loss 0.9013 ->
+  0.8935 vs 0.8999 -> 0.8954 for the ConvLSTM). By history length the effect is not monotone (+0.003, +0.007, +0.017, +0.004, +0.002,
+  +0.005 for 1, 2, 3, 4-5, 6-9, 10-14 frames): it is concentrated in the 2- and 3-frame pairs, which are exactly the early-season Field2
+  pairs below. Outside those, the Transformer's history effect (+0.0038) is about the identical-input reference (+0.003).
+- **Named, specific hypothesis, untested: early-season Field2 pairs (targets on days 16 and 22; 12% of test pairs) benefit from attention
+  over history.** On these 146 pairs the Transformer beats its single-frame control by +0.016 [+0.014, +0.018] and the ConvLSTM K=4 by
+  +0.011 / +0.010 (two seeds), versus +0.004 and -0.000 / +0.002 on the other 88%: they supply about 36% of the Transformer's pooled history
+  effect. The ConvLSTM K=4 gains less there (+0.004 over K=1). Candidate mechanisms, none tested: (a) at these early, dim, low-contrast
+  flights the last frame is uninformative and earlier frames (days 1, 8) are not, the same idea as the untested day-28-input hypothesis
+  above; (b) the offsets to every earlier frame reveal the absolute target date, hence its flight-specific exposure, which a single frame
+  plus one gap only implies; (c) early-season targets are low-contrast, so structure SSIM is easy to score there (see the contrast check
+  above). This concentration was observed after looking at many subsets, so it is a hypothesis for future work, not a finding.
+- **Attention is recency-dominant plus diffuse averaging, not selective retrieval.** For histories of 6+ frames the largest weight is on the
+  last frame in 97-100% of pairs (weight 0.45-0.58 vs a uniform 0.09-0.14), while the oldest frame gets about its uniform share (0.159 vs
+  0.139; 0.093 vs 0.085); the effective number of frames used is ~4 even for 10-14-frame histories. Caveat: only the first, last and
+  maximum weights (and the effective number of frames) were saved, so the weights on intermediate frames, and hence any recency profile,
+  are not available.
+- **No new shortcut (Control 3 protocol, restated).** Against Control 3, pooled test: Transformer structure SSIM +0.038, RGB SSIM +0.042,
+  PSNR +0.56 dB; the single-frame control +0.033, +0.037, +0.41 dB; Step C +0.033, +0.037, +0.44 dB. The Transformer's gains over Control 3
+  are essentially Step C's; its structure SSIM against Step C is +0.006.
+- **Overall conclusion.** At this data scale, more sophisticated temporal modelling yields small, mostly noise-scale gains: from Step C to the
+  best model, structure SSIM rises from 0.082 to 0.088 (+0.006, ~7% relative). The gain from using history is real in direction (+0.002 for
+  the ConvLSTM, +0.005 for the Transformer) but concentrated in specific flights (early-season Field2) rather than a general benefit of
+  history; outside them the Transformer is indistinguishable from the ConvLSTM K=4 (-0.000 against seed 42, +0.002 against seed 43). All
+  outputs remain smooth colour blobs (structure SSIM ~0.09, median ~0.056).
 
 ## Status
 
