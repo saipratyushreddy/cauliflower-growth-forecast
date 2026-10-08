@@ -18,7 +18,7 @@
 #   sbatch --export=ALL,RUN=2 --job-name=rp-nd2 scripts/repro/nondeterminism_stepc.slurm
 set -euo pipefail
 : "${RUN:?set RUN=1 or RUN=2}"
-PROJECT_DIR="${PROJECT_DIR:-$WORK/cauliflower-growth-forecast}"
+PROJECT_DIR="${PROJECT_DIR:-$SLURM_SUBMIT_DIR}"   # default: where you submitted from (the fresh clone)
 cd "$PROJECT_DIR"
 source .venv/bin/activate
 python -c "import torch; assert torch.cuda.is_available(), 'CUDA not available!'; print('GPU:', torch.cuda.get_device_name(0))"
