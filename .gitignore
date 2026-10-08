@@ -20,3 +20,6 @@ checkpoints/*
 .cache/
 .claude/
 newREADME.md
+
+# Local copy of from-scratch reproducibility results (regenerate via scripts/repro/)
+repro_fresh/
