@@ -194,6 +194,7 @@ def main():
     ap.add_argument("--scratch-dir", default=None)
     args = ap.parse_args()
     t0 = time.time()
+    args.fresh_dir, args.ref_dir = os.path.abspath(args.fresh_dir), os.path.abspath(args.ref_dir)   # the table scripts run from src/
     IMAGE_PAIRS = os.path.abspath(args.image_pairs)
     fo, ro = os.path.join(args.fresh_dir, "outputs"), os.path.join(args.ref_dir, "outputs")
     scratch = args.scratch_dir or os.path.join(args.fresh_dir, "repro_scratch")
