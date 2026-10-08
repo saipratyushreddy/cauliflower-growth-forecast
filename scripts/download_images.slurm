@@ -12,7 +12,7 @@
 set -euo pipefail
 
 # ---- EDIT these two paths if your layout differs ----
-PROJECT_DIR="$WORK/cauliflower-growth-forecast"
+PROJECT_DIR="${PROJECT_DIR:-$WORK/cauliflower-growth-forecast}"
 IMAGES_ROOT="$PROJECT_DIR/data/images"
 # -------------------------------------------------------
 

@@ -19,7 +19,7 @@ set -euo pipefail
 SEED="${SEED:-42}"
 MAXHIST="${MAXHIST:-0}"
 
-PROJECT_DIR="$WORK/cauliflower-growth-forecast"
+PROJECT_DIR="${PROJECT_DIR:-$WORK/cauliflower-growth-forecast}"
 cd "$PROJECT_DIR"
 source .venv/bin/activate
 

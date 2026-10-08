@@ -20,7 +20,7 @@ set -euo pipefail
 : "${K:?set K via --export=ALL,K=<n>}"
 
 SEED="${SEED:-42}"
-PROJECT_DIR="$WORK/cauliflower-growth-forecast"
+PROJECT_DIR="${PROJECT_DIR:-$WORK/cauliflower-growth-forecast}"
 cd "$PROJECT_DIR"
 source .venv/bin/activate
 
