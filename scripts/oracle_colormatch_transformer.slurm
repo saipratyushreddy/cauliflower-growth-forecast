@@ -14,7 +14,7 @@
 # Inference only, from the saved, already-selected checkpoints (no training, no model selection).
 # ORACLE DIAGNOSTIC: predictions are colour-matched to their own targets; not achievable at inference.
 set -euo pipefail
-PROJECT_DIR="$WORK/cauliflower-growth-forecast"
+PROJECT_DIR="${PROJECT_DIR:-$WORK/cauliflower-growth-forecast}"
 cd "$PROJECT_DIR"
 source .venv/bin/activate
 python -c "import torch; assert torch.cuda.is_available(), 'CUDA not available!'; print('GPU:', torch.cuda.get_device_name(0))"
