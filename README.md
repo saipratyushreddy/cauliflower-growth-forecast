@@ -1097,9 +1097,9 @@ Protocol check for both K=4 runs:
   honest summary is "same order as the noise", not a proven zero. The effect, if real, is at most ~0.002
   structure SSIM (~2% relative).
   *Update from the reproducibility pass:* the noise references in this bullet (a two-seed difference, 110-pair subsets) were the best available
-  then. A tighter estimate, the RMS of original-vs-fresh differences of the pooled mean for six identical configurations (~0.0004,
-  Reproducibility section), puts the ConvLSTM's history effect at about 6x (seed 42, +0.0023) and 2x (seed 43, +0.0008) that noise, so
-  "indistinguishable from noise" overstates it for seed 42; the effect remains small (<= ~0.002, ~2% relative).
+  then. A better estimate, the within-configuration run-to-run spread of the pooled mean (per-run SD ~0.0006, so ~0.0008 for a difference
+  between two single runs; Reproducibility section), puts the ConvLSTM's history effect at about 3x (seed 42, +0.0023) and 1x (seed 43, +0.0008)
+  that noise: "indistinguishable from noise" holds for seed 43 and understates seed 42 modestly; the effect remains small (<= ~0.002, ~2% relative).
 - **This characterizes THIS encoder / K = 4 design, not history in general.** K=4 discards older history for
   65% of pairs, half of Field1 is padded, and the history only enters through a recurrent state over
   bottleneck features. The CNN-Transformer, which conditions on the full available sequence through
@@ -1396,14 +1396,15 @@ natural next check if this finding needs to generalize beyond early-season Field
   the three runs that use history (ConvLSTM K=4 x2, Transformer) all sit above the three that do not (Step C, ConvLSTM K=1, Transformer
   K=1), by +0.0034 on average (0.0865 vs 0.0831, ~4% relative), although the closest pair differs by only 0.0008 and the runs are single
   seeds (two for K=4). Bootstrap intervals cover test-plant sampling only, not training randomness.
-  *Update from the reproducibility pass:* this bullet was written against the looser references above. Against the tighter two-replicate
-  pooled-mean estimate (RMS ~0.0004), only the Step C -> Transformer K=1 step (+0.0004) is within noise; the other steps (+0.001 to +0.003)
-  are about 2x to 7x that estimate, and the cumulative history/no-history separation (+0.0034) is about 8x it.
+  *Update from the reproducibility pass:* this bullet was written against the looser references above. Against the within-configuration
+  run-to-run noise estimate (a difference between two single runs ~0.0008), the Step C -> Transformer K=1 step (+0.0004) is within noise (0.5x); the
+  other steps (+0.001 to +0.003) are about 1x to 4x it; and the cumulative history/no-history separation (+0.0034, a difference of three-run means,
+  noise ~0.0005) is about 7x it.
 - **The Transformer's own history effect (+0.005 structure SSIM, [+0.005, +0.006]) is the largest of the history effects measured, but it
-  is not general.** It is larger than the two-replicate pooled-mean noise estimate (RMS ~0.0004, described in the Reproducibility section
-  below; about 12x), but the earlier 110-pair identical-input reference is itself unstable across replicates (+0.0033 / +0.0043 originally,
-  +0.0052 / +0.0028 in the fresh run) and should not be read as a reliable ceiling. For consistency, the ConvLSTM's history effect (+0.002 for
-  K=4 seed 42, +0.001 for seed 43; fresh run +0.0020 / +0.0013) is about 6x and 2x the same replicate estimate (original run). Validation shows the same direction and a larger gap (val loss 0.9013 ->
+  is not general.** It is larger than the run-to-run noise estimate for a difference between two single runs (about 0.0008, from within-configuration
+  replicates, described in the Reproducibility section below; about 6x), but the earlier 110-pair identical-input reference is itself unstable across
+  replicates (+0.0033 / +0.0043 originally, +0.0052 / +0.0028 in the fresh run) and should not be read as a reliable ceiling. For consistency, the
+  ConvLSTM's history effect (+0.0023 for K=4 seed 42, +0.0008 for seed 43; fresh run +0.0020 / +0.0013) is about 3x and 1x the same estimate. Validation shows the same direction and a larger gap (val loss 0.9013 ->
   0.8935 vs 0.8999 -> 0.8954 for the ConvLSTM). By history length the effect is not monotone (+0.003, +0.007, +0.017, +0.004, +0.002,
   +0.005 for 1, 2, 3, 4-5, 6-9, 10-14 frames): it is concentrated in the 2- and 3-frame pairs, which are exactly the early-season Field2
   pairs below. Outside those, the Transformer's history effect (+0.0038) is about the identical-input reference (+0.003).
@@ -1465,20 +1466,50 @@ behaviour). GPU models, original vs fresh: Step C L40S / L40S; ConvLSTM K=1, K=4
 | Transformer K=1 | 0.08265 | 0.08271 | +0.00005 |
 | Transformer (full) | 0.08788 | 0.08746 | -0.00042 |
 
-**Primary noise reference: the two-replicate pooled-mean estimate.** The original and fresh runs of one configuration are replicates (same code,
-seed and data). The root-mean-square of the six differences above is **0.0004** (maximum 0.0006; mean -0.0001), the right size to compare with a
-difference between two single runs. This supersedes the earlier references (two-seed difference 0.0016 / 0.0008 in the fresh run; 110-pair
-identical-input subsets +0.0033 / +0.0043 originally and +0.0052 / +0.0028 fresh), which are larger and unstable across replicates. It assumes similar
-run-to-run noise across configurations (n = 6). Subset-level quantities are noisier: gaps on the 146 early-Field2 pairs and the swapped-history arms
-move by ~0.001-0.002 between replicates (up to 0.004 in the worst case, the copy-last-frame arm); individual pairs differ by up to 0.02-0.05 structure SSIM;
-win rates, medians and confidence-interval endpoints change in the last digit or two (and win rates on 110-pair buckets by tens of percentage
-points when the underlying difference is tiny). All signs and all CI-versus-zero statuses replicate.
+**Primary noise reference: the within-configuration run-to-run spread of the pooled mean.** Pooling all replicate runs (four runs of Step C: the
+original, the fresh run and two further same-environment reruns, see below; two runs each of the other five configurations), the per-run SD of the
+pooled test structure SSIM is **0.0006** (8 degrees of freedom; 95% CI 0.0004-0.0011; Step C alone, four runs, 0.0009, maximum pairwise
+difference 0.0021). The noise SD of a *difference between two single runs* is therefore about **0.0008** (CI 0.0006-0.0016), and of a difference
+between two three-run means about 0.0005. This supersedes (i) an earlier estimate of 0.0004 (the RMS of the six original-vs-fresh differences),
+which understated the spread (the two further Step C reruns differ from each other by up to 0.0021), and (ii) the earlier references (two-seed
+difference 0.0016 / 0.0008 in the fresh run; 110-pair identical-input subsets +0.0033 / +0.0043 originally and +0.0052 / +0.0028 fresh), which are
+consistent with this spread but unstable. It assumes similar run-to-run noise across configurations and rests on few degrees of freedom. Subset-level
+quantities are noisier: gaps on the 146 early-Field2 pairs and the swapped-history arms move by ~0.001-0.002 between replicates (up to 0.004 in the
+worst case, the copy-last-frame arm); individual pairs differ by up to 0.02-0.05 structure SSIM; win rates, medians and confidence-interval endpoints
+change in the last digit or two (and win rates on 110-pair buckets by tens of percentage points when the underlying difference is tiny). All signs
+and all CI-versus-zero statuses replicate.
 
-**Cause of the non-reproducibility: not isolated yet** (pending the same-environment rerun test below). Established so far: same code, same seeds, same
-data and same Python environment; the divergence is present from epoch 1 and also where the GPU model is identical (Step C, both Transformers).
+**Cause of the non-reproducibility: intrinsic run-to-run training nondeterminism, isolated by a same-environment rerun test.** Two further Step C
+runs were launched with identical settings (seed 42, default hyperparameters) from the same fresh clone, venv and data, pinned to an L40S GPU
+(the GPU model of the original and the fresh Step C run), writing to separate folders (`scripts/repro/nondeterminism_stepc.slurm`,
+`src/nondeterminism_compare.py`; decision rule fixed before the reruns). The runs of one configuration (original, fresh, nd1, nd2):
+
+| Run | Epochs run | Selected epoch | Best val loss | Test structure SSIM | Test RGB SSIM | Test PSNR |
+|---|---|---|---|---|---|---|
+| original | 73 | 61 | 0.902081 | 0.08230 | 0.25398 | 14.842 |
+| fresh | 64 | 52 | 0.900164 | 0.08282 | 0.25454 | 14.872 |
+| nd1 (same environment) | 66 | 54 | 0.902262 | 0.08120 | 0.25362 | 14.820 |
+| nd2 (same environment) | 66 | 54 | 0.900796 | 0.08328 | 0.25475 | 14.840 |
+
+| Pair | First epoch val loss differs by >1e-6 | Pooled-mean diff, structure SSIM | RGB SSIM | PSNR | Max per-pair abs diff (structure SSIM) | Pairs differing >1e-6 |
+|---|---|---|---|---|---|---|
+| original vs fresh | 1 | +0.00052 | +0.00056 | +0.031 | 4.79e-02 | 100% |
+| original vs nd1 | 1 | -0.00110 | -0.00037 | -0.022 | 3.17e-02 | 100% |
+| original vs nd2 | 1 | +0.00098 | +0.00077 | -0.002 | 3.98e-02 | 100% |
+| fresh vs nd1 | 1 | -0.00162 | -0.00093 | -0.052 | 3.95e-02 | 100% |
+| fresh vs nd2 | 1 | +0.00046 | +0.00021 | -0.032 | 3.14e-02 | 100% |
+| nd1 vs nd2 | 1 | +0.00208 | +0.00114 | +0.020 | 5.54e-02 | 100% |
+
+The three same-environment runs (fresh, nd1, nd2) diverge from each other, all three pairs, from epoch 1, with pooled-mean differences of -0.0016, +0.0005
+and +0.0021 (RMS 0.0015, the same order as the all-six-pairs RMS of 0.0013 and larger than original-vs-fresh, 0.0005) and per-pair differences up to
+0.055. So identical code, seed, data, Python environment and GPU model are enough to produce divergence: **no environment change between the original
+and fresh runs is needed to explain the gap**, and the original-vs-fresh difference is an ordinary draw from this run-to-run spread. The training code
+sets seeds but not deterministic-kernel flags; which operations are nondeterministic was not investigated, and enabling deterministic mode would
+change training behaviour (a new baseline) rather than reproduce the original runs. The job logs' node and driver lines were not reviewed.
 
 **Wall-clock.** Step A 11.6 min; Step B 3.55 h from first submission to last job end (critical path: the full Transformer at 3.46 h, then the dependent
-oracle and swapped-history jobs, which waited 208 min for it); Step C 15 s; about 3.8 h in total, with 10.56 h of summed job time over 11 jobs.
+oracle and swapped-history jobs, which waited 208 min for it); Step C 15 s; about 3.8 h in total, with 10.56 h of summed job time over 11 jobs. The same-environment nondeterminism test added two further Step C reruns
+(38 min each, run in parallel).
 
 **Claim-by-claim comparison (42 quantities: original vs fresh).** Each README quantity of the image track recomputed from the fresh run with the
 same plant-level bootstrap. "Original / README" is recomputed from the original per-pair scores, except the swap and oracle rows (S, O), whose original
