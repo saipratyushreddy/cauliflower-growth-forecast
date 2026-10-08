@@ -1,0 +1,333 @@
+{
+  "cleaned_pairs": {
+    "test": 1233
+  },
+  "day28_pairs_by_split": {
+    "test": 74
+  },
+  "label": "control 3",
+  "test_results": {
+    "pooled": {
+      "n_pairs": 1233,
+      "n_plants": 110,
+      "ssim": {
+        "mean": 0.21732433724975525,
+        "median": 0.120510338279366
+      },
+      "psnr": {
+        "mean": 14.397840381857206,
+        "median": 12.03840146138916
+      },
+      "structure_ssim": {
+        "mean": 0.049379592805594064,
+        "median": 0.0317400012962337
+      }
+    },
+    "pooled_excl_f1_day28": {
+      "n_pairs": 1159,
+      "n_plants": 110,
+      "ssim": {
+        "mean": 0.20570310147606094,
+        "median": 0.1165775175058908
+      },
+      "psnr": {
+        "mean": 14.05937215528273,
+        "median": 11.73852457911336
+      },
+      "structure_ssim": {
+        "mean": 0.04650845798804381,
+        "median": 0.0317005794528963
+      }
+    },
+    "Field1": {
+      "n_pairs": 215,
+      "n_plants": 37,
+      "ssim": {
+        "mean": 0.27624199896770607,
+        "median": 0.2306355438366222
+      },
+      "psnr": {
+        "mean": 16.97301682658059,
+        "median": 16.093571946040623
+      },
+      "structure_ssim": {
+        "mean": 0.052001403244803464,
+        "median": 0.031242880415197
+      }
+    },
+    "Field1_excl_day28": {
+      "n_pairs": 141,
+      "n_plants": 37,
+      "ssim": {
+        "mean": 0.21163841531817884,
+        "median": 0.2306355438366222
+      },
+      "psnr": {
+        "mean": 15.542367055727514,
+        "median": 16.093571946040623
+      },
+      "structure_ssim": {
+        "mean": 0.029777067918283946,
+        "median": 0.0308601332065506
+      }
+    },
+    "Field1_day28_only": {
+      "n_pairs": 74,
+      "n_plants": 37,
+      "ssim": {
+        "mean": 0.3993380164620756,
+        "median": 0.38479022112538463
+      },
+      "psnr": {
+        "mean": 19.698984633206045,
+        "median": 19.31619943977099
+      },
+      "structure_ssim": {
+        "mean": 0.09434777190749606,
+        "median": 0.0822300327297759
+      }
+    },
+    "Field1 target is day28 (bright->dark)": {
+      "n_pairs": 37,
+      "n_plants": 37,
+      "ssim": {
+        "mean": 0.6604894017988899,
+        "median": 0.6483330524534757
+      },
+      "psnr": {
+        "mean": 25.805070573194207,
+        "median": 25.85512435106241
+      },
+      "structure_ssim": {
+        "mean": 0.1682851009318637,
+        "median": 0.1612356617813102
+      }
+    },
+    "Field1 input is day28 (dark->bright)": {
+      "n_pairs": 37,
+      "n_plants": 37,
+      "ssim": {
+        "mean": 0.13818663112526133,
+        "median": 0.1487161795894012
+      },
+      "psnr": {
+        "mean": 13.592898693217883,
+        "median": 13.555817050062211
+      },
+      "structure_ssim": {
+        "mean": 0.020410442883128415,
+        "median": 0.0202998633476211
+      }
+    },
+    "Field2": {
+      "n_pairs": 1018,
+      "n_plants": 73,
+      "ssim": {
+        "mean": 0.20488101969635697,
+        "median": 0.10951128248604164
+      },
+      "psnr": {
+        "mean": 13.85396716416022,
+        "median": 11.564410329286346
+      },
+      "structure_ssim": {
+        "mean": 0.04882587056155672,
+        "median": 0.03203853156260725
+      }
+    }
+  },
+  "paired_vs_copy_forward": {
+    "pooled": {
+      "n_pairs": 1233,
+      "ssim": {
+        "delta_mean": 0.0952391299688856,
+        "delta_median": 0.051771951762201895,
+        "win_rate": 0.9229521492295215,
+        "model_mean": 0.21732433724975525,
+        "base_mean": 0.12208520728086965
+      },
+      "psnr": {
+        "delta_mean": 4.361944212071098,
+        "delta_median": 2.822949208657189,
+        "win_rate": 0.9967558799675588,
+        "model_mean": 14.397840381857206,
+        "base_mean": 10.035896169786106
+      },
+      "structure_ssim": {
+        "delta_mean": 0.005228609430081043,
+        "delta_median": 0.0012035156592334999,
+        "win_rate": 0.5409570154095702,
+        "model_mean": 0.049379592805594064,
+        "base_mean": 0.04415098337551302
+      }
+    },
+    "pooled_excl_f1_day28": {
+      "n_pairs": 1159,
+      "ssim": {
+        "delta_mean": 0.08187599046535607,
+        "delta_median": 0.0508643413508292,
+        "win_rate": 0.9180327868852459,
+        "model_mean": 0.20570310147606094,
+        "base_mean": 0.12382711101070487
+      },
+      "psnr": {
+        "delta_mean": 3.959323682613433,
+        "delta_median": 2.6207417754954303,
+        "win_rate": 0.996548748921484,
+        "model_mean": 14.05937215528273,
+        "base_mean": 10.100048472669297
+      },
+      "structure_ssim": {
+        "delta_mean": 0.0006327121976844565,
+        "delta_median": 0.0005317326504431993,
+        "win_rate": 0.5185504745470233,
+        "model_mean": 0.04650845798804381,
+        "base_mean": 0.04587574579035935
+      }
+    },
+    "Field1": {
+      "n_pairs": 215,
+      "ssim": {
+        "delta_mean": 0.1806579514087999,
+        "delta_median": 0.12062884914618083,
+        "win_rate": 0.9813953488372092,
+        "model_mean": 0.27624199896770607,
+        "base_mean": 0.09558404755890623
+      },
+      "psnr": {
+        "delta_mean": 5.648698383997998,
+        "delta_median": 4.130362886104217,
+        "win_rate": 0.9953488372093023,
+        "model_mean": 16.97301682658059,
+        "base_mean": 11.324318442582593
+      },
+      "structure_ssim": {
+        "delta_mean": 0.03374842773705431,
+        "delta_median": 0.013671018792257801,
+        "win_rate": 0.8511627906976744,
+        "model_mean": 0.052001403244803464,
+        "base_mean": 0.018252975507749163
+      }
+    },
+    "Field1_excl_day28": {
+      "n_pairs": 141,
+      "ssim": {
+        "delta_mean": 0.11564457624541633,
+        "delta_median": 0.12062884914618083,
+        "win_rate": 0.9716312056737588,
+        "model_mean": 0.21163841531817884,
+        "base_mean": 0.09599383907276253
+      },
+      "psnr": {
+        "delta_mean": 3.01453253350974,
+        "delta_median": 3.0592239268337167,
+        "win_rate": 0.9929078014184397,
+        "model_mean": 15.542367055727514,
+        "base_mean": 12.527834522217773
+      },
+      "structure_ssim": {
+        "delta_mean": 0.010938652292858389,
+        "delta_median": 0.012984197425245298,
+        "win_rate": 0.8297872340425532,
+        "model_mean": 0.029777067918283946,
+        "base_mean": 0.01883841562542556
+      }
+    },
+    "Field1_day28_only": {
+      "n_pairs": 74,
+      "ssim": {
+        "delta_mean": 0.3045347878687604,
+        "delta_median": 0.28909135413725473,
+        "win_rate": 1.0,
+        "model_mean": 0.3993380164620756,
+        "base_mean": 0.09480322859331518
+      },
+      "psnr": {
+        "delta_mean": 10.667852234252651,
+        "delta_median": 8.979623174190834,
+        "win_rate": 1.0,
+        "model_mean": 19.698984633206045,
+        "base_mean": 9.031132398953394
+      },
+      "structure_ssim": {
+        "delta_mean": 0.0772102971645087,
+        "delta_median": 0.06501693504027706,
+        "win_rate": 0.8918918918918919,
+        "model_mean": 0.09434777190749606,
+        "base_mean": 0.017137474742987376
+      }
+    },
+    "Field1 target is day28 (bright->dark)": {
+      "n_pairs": 37,
+      "ssim": {
+        "delta_mean": 0.5651008589895259,
+        "delta_median": 0.5693294747435853,
+        "win_rate": 1.0,
+        "model_mean": 0.6604894017988899,
+        "base_mean": 0.09538854280936387
+      },
+      "psnr": {
+        "delta_mean": 17.038519341146287,
+        "delta_median": 17.29528821899832,
+        "win_rate": 1.0,
+        "model_mean": 25.805070573194207,
+        "base_mean": 8.766551232047926
+      },
+      "structure_ssim": {
+        "delta_mean": 0.15042670563826985,
+        "delta_median": 0.14450619812953971,
+        "win_rate": 1.0,
+        "model_mean": 0.1682851009318637,
+        "base_mean": 0.01785839529359386
+      }
+    },
+    "Field1 input is day28 (dark->bright)": {
+      "n_pairs": 37,
+      "ssim": {
+        "delta_mean": 0.04396871674799484,
+        "delta_median": 0.0451244185976645,
+        "win_rate": 1.0,
+        "model_mean": 0.13818663112526133,
+        "base_mean": 0.09421791437726652
+      },
+      "psnr": {
+        "delta_mean": 4.29718512735902,
+        "delta_median": 4.288070057392476,
+        "win_rate": 1.0,
+        "model_mean": 13.592898693217883,
+        "base_mean": 9.295713565858865
+      },
+      "structure_ssim": {
+        "delta_mean": 0.003993888690747513,
+        "delta_median": 0.002137762279547102,
+        "win_rate": 0.7837837837837838,
+        "model_mean": 0.020410442883128415,
+        "base_mean": 0.016416554192380896
+      }
+    },
+    "Field2": {
+      "n_pairs": 1018,
+      "ssim": {
+        "delta_mean": 0.07719880913432611,
+        "delta_median": 0.04750240463715825,
+        "win_rate": 0.9106090373280943,
+        "model_mean": 0.20488101969635697,
+        "base_mean": 0.12768221056203088
+      },
+      "psnr": {
+        "delta_mean": 4.090183753363551,
+        "delta_median": 2.5623115806344314,
+        "win_rate": 0.9970530451866405,
+        "model_mean": 13.85396716416022,
+        "base_mean": 9.76378341079667
+      },
+      "structure_ssim": {
+        "delta_mean": -0.000794731371489929,
+        "delta_median": -0.0008875781276233494,
+        "win_rate": 0.47544204322200395,
+        "model_mean": 0.04882587056155672,
+        "base_mean": 0.04962060193304665
+      }
+    }
+  }
+}
