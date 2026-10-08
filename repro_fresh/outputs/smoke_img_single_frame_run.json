@@ -1,0 +1,30 @@
+{
+ "best_epoch": 2,
+ "best_val_loss": 1.0391709804534912,
+ "norm": {
+  "mean": 6.8125,
+  "std": 4.113580259724063
+ },
+ "args": {
+  "image_pairs": "data/image_pairs.parquet",
+  "cache_dir": "data",
+  "out_dir": "outputs",
+  "checkpoint_dir": "checkpoints",
+  "device": "cuda",
+  "batch_size": 16,
+  "lr": 0.0003,
+  "weight_decay": 0.0001,
+  "w_l1": 1.0,
+  "w_ssim": 1.0,
+  "max_epochs": 2,
+  "patience": 12,
+  "seed": 42,
+  "amp": true,
+  "smoke": true
+ },
+ "n_pairs_by_split": {
+  "train": 5823,
+  "val": 1330,
+  "test": 1233
+ }
+}
