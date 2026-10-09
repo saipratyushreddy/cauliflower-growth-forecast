@@ -9,6 +9,8 @@ pip install -r requirements-demo.txt
 streamlit run app.py                       # uses ./demo_bundle ; or:  DEMO_BUNDLE=/path/to/demo_bundle streamlit run app.py
 ```
 
+The URL records the state (`?plant=...&cutoff=...&drop=...`), so a state can be bookmarked and reopened exactly.
+
 ## What to copy off Swan (everything else stays on the cluster)
 
 Run **on Swan, in the original project directory** (the one whose checkpoints produced the README numbers; not the `cauliflower-repro` re-run):
