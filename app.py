@@ -52,6 +52,15 @@ plants = be.plants()
 label = {p: f"{p}  ({f})" for p, f in plants}
 
 st.title("Cauliflower growth forecast: predicting a plant's next image")
+# Bookmarkable states: ?plant=<id>&cutoff=<number of input images>&drop=<0|25|50|75> pre-selects the widgets (only on the first run of a session).
+_qp = st.query_params
+if "plant" not in st.session_state and _qp.get("plant") in {p for p, _ in plants}:
+    st.session_state["plant"] = _qp["plant"]
+    _cuts = dict(be.cutoffs(_qp["plant"]))
+    if _qp.get("cutoff", "").isdigit() and int(_qp["cutoff"]) in _cuts and len(_cuts) > 1:
+        st.session_state["cutoff"] = int(_qp["cutoff"])
+    if _qp.get("drop", "").isdigit() and int(_qp["drop"]) in DROP_LEVELS:
+        st.session_state["drop"] = int(_qp["drop"])
 with st.sidebar:
     st.header("Held-out test plant")
     plant = st.selectbox(f"Plant ({len(plants)} test plants)", [p for p, _ in plants], format_func=lambda p: label[p], index=0, key="plant")
@@ -68,6 +77,7 @@ with st.sidebar:
     show_cf = st.checkbox("Also show the naive copy-forward prediction", value=True, key="cf")
     st.caption("Same sidebar state -> same result: the random drop uses a fixed seed derived from (plant, target day, drop level).")
 
+st.query_params.update({"plant": plant, "cutoff": str(n_frames), "drop": str(drop_pct)})
 with st.spinner("Running both models on CPU..."):
     r = run_state(plant, n_frames, drop_pct)
 
@@ -92,6 +102,10 @@ for start in range(0, len(imgs), per_row):
         cap = f"day {days[i]} (-{r['target_day'] - days[i]} d)" + ("" if i in kept else "  DROPPED")
         col.image(imgs[i] if i in kept else greyed(imgs[i]), caption=cap, use_container_width=True)
 
+if r["field"] == "Field1" and (r["target_day"] == 28 or r["input_days"][-1] == 28):
+    st.info("**Context for this pair.** Field1 day 28 (2020-08-25) is a very dark, low-contrast flight. The README reports these pairs separately because "
+            "scores on them are dominated by exposure: scores on day-28 *target* pairs overstate the models' skill (a colour-and-blur control with no learning "
+            "reproduces most of the gain), and day-28 *input* pairs are hard for every method.")
 st.markdown("**Real target vs predictions** (metrics are against the real target)")
 names = ["Transformer", "ConvLSTM"] + (["Copy-forward"] if show_cf else [])
 cols = st.columns(1 + len(names))
@@ -112,4 +126,6 @@ with st.expander("About this demo"):
         "- **How to read the scores.** Pooled over the 1,233 test pairs (README): structure SSIM 0.044 copy-forward, 0.087 ConvLSTM K=4, 0.088 Transformer. "
         "The predictions are smooth, blurry colour fields, not sharp images, and absolute scores are low; the models' advantage over copy-forward is mainly "
         "in smooth/low-frequency agreement, with a small structure SSIM gain. Individual plants vary widely around these means.\n"
+        "- **Field1 day-28 pairs** (very dark flight) are flagged on screen: the README reports them separately because exposure dominates their scores.\n"
+        "- **Bookmarkable states.** The URL carries `plant`, `cutoff` and `drop`, so a state can be reopened exactly.\n"
         "- **Not shown on purpose.** Nothing that was not validated in the README (for example, attention weights or any result at drop > 0).")
