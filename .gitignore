@@ -23,3 +23,6 @@ newREADME.md
 
 # Local copy of from-scratch reproducibility results (regenerate via scripts/repro/)
 repro_fresh/
+
+# Demo bundle copied from Swan (images + checkpoints), not committed
+demo_bundle/

@@ -1,0 +1,11 @@
+# Demo UI (app.py): runs on a laptop CPU with the bundle from scripts/export_demo_bundle.py
+streamlit
+torch            # CPU build is enough, e.g. pip install torch --index-url https://download.pytorch.org/whl/cpu
+numpy
+pandas
+pyarrow
+scipy
+scikit-image
+scikit-learn     # imported by robustness_missing_obs.py, whose drop_indices() the app reuses unchanged
+pillow
+matplotlib       # imported by the training modules the app reuses

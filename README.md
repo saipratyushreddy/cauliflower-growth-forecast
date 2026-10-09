@@ -68,6 +68,8 @@ outputs/         Reports, plots, saved figures (gitignored; regenerate via scrip
 checkpoints/     Trained model weights (gitignored; regenerate via scripts below)
 ```
 
+`app.py` + `DEMO.md`: Streamlit demo of the image-to-image track (laptop, CPU; needs a bundle exported from Swan, see `DEMO.md`).
+
 ## Environment setup
 
 ```bash
