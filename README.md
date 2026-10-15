@@ -1433,6 +1433,44 @@ natural next check if this finding needs to generalize beyond early-season Field
   outputs remain smooth colour blobs (structure SSIM ~0.09, median ~0.056). The history benefit that does exist (early-season Field2) depends on the plant's own earlier frames (swapped-history
   test) and the model degrades below the single-frame baseline when history is inconsistent.
 
+### Memorisation check: frozen models on training vs unseen plants
+
+Question: do the models predict plants they were trained on better than unseen plants? `src/memorization_check.py` (inference only, original checkpoints behind
+the README numbers, no augmentation, same scoring as every table) scores the Transformer and ConvLSTM K=4 on all train / validation / test pairs, with
+copy-forward on each split as a difficulty control (it uses no training). Pooled, mean (median):
+
+| Model | Split | Pairs | Structure SSIM | RGB SSIM | PSNR dB |
+|---|---|---|---|---|---|
+| Copy-forward | train | 5,823 | 0.0434 (0.0277) | 0.1204 (0.0700) | 10.02 (9.05) |
+| Copy-forward | val | 1,330 | 0.0455 (0.0293) | 0.1229 (0.0687) | 9.96 (8.95) |
+| Copy-forward | test | 1,233 | 0.0442 (0.0277) | 0.1221 (0.0719) | 10.04 (9.06) |
+| ConvLSTM K=4 | train | 5,823 | 0.1016 (0.0769) | 0.2745 (0.1870) | 15.47 (13.05) |
+| ConvLSTM K=4 | val | 1,330 | 0.0873 (0.0575) | 0.2536 (0.1582) | 14.69 (12.25) |
+| ConvLSTM K=4 | test | 1,233 | 0.0866 (0.0567) | 0.2580 (0.1652) | 14.87 (12.41) |
+| Transformer | train | 5,823 | 0.0978 (0.0703) | 0.2687 (0.1773) | 15.35 (12.96) |
+| Transformer | val | 1,330 | 0.0884 (0.0555) | 0.2547 (0.1571) | 14.77 (12.39) |
+| Transformer | test | 1,233 | 0.0879 (0.0560) | 0.2594 (0.1643) | 14.96 (12.59) |
+
+Copy-forward scores the same on all three splits (structure SSIM 0.043 / 0.046 / 0.044), so the splits are equally hard and the train-test difference is not
+split difficulty. Gain over copy-forward on the same pairs, with the train-minus-test difference [95% CI; plants resampled independently per group]:
+
+| Model | Metric | gain on train | gain on test | train minus test |
+|---|---|---|---|---|
+| ConvLSTM K=4 | structure_ssim | +0.0583 | +0.0425 | +0.0158 [+0.0140, +0.0175] |
+| ConvLSTM K=4 | ssim | +0.1541 | +0.1359 | +0.0182 [+0.0117, +0.0237] |
+| ConvLSTM K=4 | psnr | +5.45 | +4.84 | +0.61 [+0.47, +0.74] |
+| Transformer | structure_ssim | +0.0544 | +0.0437 | +0.0107 [+0.0090, +0.0123] |
+| Transformer | ssim | +0.1483 | +0.1373 | +0.0110 [+0.0048, +0.0165] |
+| Transformer | psnr | +5.32 | +4.93 | +0.40 [+0.26, +0.52] |
+
+**Reading.** Both models do better on plants they were trained on, so there is some memorisation: the train-minus-test difference of the structure SSIM gain is
++0.0158 [+0.0140, +0.0175] (ConvLSTM K=4) and +0.0107 [+0.0090, +0.0123] (Transformer). But about 73% (ConvLSTM) and 80% (Transformer) of the training
+structure gain is retained on unseen plants, and validation matches test (0.087 / 0.087 and 0.088 / 0.088), so the model selection did not leak into the test
+split. The same pattern holds excluding Field1 day-28 pairs and in each field separately. The Transformer memorises less than the ConvLSTM (14.1M vs 9.7M
+parameters; that this is the reason was not tested). Caveats: training plants and test plants are different plants, so plant-level difficulty cannot be fully
+separated from memorisation (the copy-forward control argues against it, a retraining-with-held-out-plants test would settle it); one run per model; the
+intervals cover plant sampling, not training randomness (run-to-run noise on a pooled mean is about 0.0008).
+
 ## Reproducibility pass (image-to-image track)
 
 **Procedure (from a fresh clone, 2026-10-08).** Step A verified the underlying data before reuse; Step B re-ran every training run, control and
