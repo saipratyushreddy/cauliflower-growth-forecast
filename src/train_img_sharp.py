@@ -27,6 +27,7 @@ import torch
 
 from img_film_unet import FiLMUNet, gaussian_window, ssim_torch
 from img_sharp import ResFiLMUNet, VGGPerceptual, sharpness_table
+from image_copy_forward_baseline import structure_ssim
 from train_img_single_frame import (EXPECTED_COUNTS, augment, batches, figure, load_rows, plot_history, predict_uint8, psnr_torch,
                                     score_pairs, to_gpu)
 
@@ -44,11 +45,16 @@ def expand_any_gap(pairs, cache_idx):
     return df
 
 
-def run_epoch(model, vgg, arr, df, norm, args, device, win, optimizer=None, rng=None, n_samples=None):
+def run_epoch(model, vgg, arr, df, norm, args, device, win, optimizer=None, rng=None, n_samples=None, n_keep=0):
     train = optimizer is not None
     model.train(train)
     offs = ((df["offset"].values - norm["mean"]) / norm["std"]).astype(np.float32)
-    idx = rng.choice(len(df), size=n_samples, replace=False) if (train and n_samples) else np.arange(len(df))
+    if train and n_samples and n_keep:   # --keep-standard: the first n_keep rows (standard pairs) always, plus n_samples sampled from the rest
+        idx = np.concatenate([np.arange(n_keep), n_keep + rng.choice(len(df) - n_keep, size=n_samples, replace=False)])
+    elif train and n_samples:
+        idx = rng.choice(len(df), size=n_samples, replace=False)
+    else:
+        idx = np.arange(len(df))
     tot = {"loss": 0.0, "l1": 0.0, "ssim": 0.0, "psnr": 0.0, "perc": 0.0}
     n = 0
     for b0 in batches(len(idx), args.batch_size, train, rng):
@@ -110,6 +116,10 @@ def main():
     ap.add_argument("--w-perc", type=float, default=0.0)
     ap.add_argument("--any-gap", action="store_true")
     ap.add_argument("--epoch-size", type=int, default=0, help="pairs sampled per epoch with --any-gap (0 = size of the standard train set)")
+    ap.add_argument("--keep-standard", action="store_true",
+                    help="with --any-gap: every epoch uses ALL standard train pairs plus --epoch-size sampled any-gap pairs (default epoch-size = standard train size)")
+    ap.add_argument("--select-metric", choices=["loss", "structure"], default="loss",
+                    help="checkpoint / early-stopping metric on the standard validation pairs: combined loss (default) or skimage structure SSIM (the headline metric)")
     ap.add_argument("--eval-any-gap", action="store_true", help="also score the test plants' any-gap pairs (gap-stratified view)")
     ap.add_argument("--no-pretrained-vgg", dest="pretrained_vgg", action="store_false", help="smoke tests only")
     ap.add_argument("--batch-size", type=int, default=16)
@@ -146,10 +156,16 @@ def main():
     if args.any_gap:
         tr = expand_any_gap(pairs[pairs.split == "train"].loc[lambda d: d.pair_id.isin(tr_std.pair_id)] if args.smoke else pairs[pairs.split == "train"], cache_idx)
         n_epoch = args.epoch_size or len(tr_std)
+        n_keep = 0
+        if args.keep_standard:   # standard pairs first, so run_epoch can always include them
+            cols = ["pair_id", "plant_id", "field", "split", "gap_days", "row_in", "row_tg", "offset", "n_input_frames"]
+            std = tr_std.assign(gap_days=tr_std["offset"].astype(int), n_input_frames=1)[cols]
+            tr = pd.concat([std, tr[cols]], ignore_index=True)
+            n_keep = len(std)
         print(f"Any-gap training set: {len(tr)} (earlier photo -> later photo) pairs from {len(tr_std)} standard pairs; gaps {tr.gap_days.min()}-{tr.gap_days.max()} days "
               f"(median {int(tr.gap_days.median())}); {n_epoch} sampled per epoch", flush=True)
     else:
-        tr, n_epoch = tr_std, None
+        tr, n_epoch, n_keep = tr_std, None, 0
     norm = {"mean": float(tr["offset"].mean()), "std": float(tr["offset"].std() or 1.0)}
     print(f"Offset normalization (train only): {norm}", flush=True)
 
@@ -162,16 +178,22 @@ def main():
     sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, factor=0.5, patience=4)
 
     ckpt = os.path.join(args.checkpoint_dir, f"{tag}_best.pt")
-    hist, best, bad = [], float("inf"), 0
+    hist, best, bad = [], (-float("inf") if args.select_metric == "structure" else float("inf")), 0
     for ep in range(1, args.max_epochs + 1):
         t0 = time.time()
-        trm = run_epoch(model, vgg_train, arr, tr, norm, args, device, win, optimizer=opt, rng=rng, n_samples=n_epoch)
+        trm = run_epoch(model, vgg_train, arr, tr, norm, args, device, win, optimizer=opt, rng=rng, n_samples=n_epoch, n_keep=n_keep)
         vam = run_epoch(model, vgg_train, arr, va, norm, args, device, win)
         sched.step(vam["loss"])
         hist.append({"epoch": ep, "train": trm, "val": vam, "lr": opt.param_groups[0]["lr"], "sec": time.time() - t0})
-        improved = vam["loss"] < best
+        if args.select_metric == "structure":
+            vp = predict_uint8(model, arr, va, norm, device)
+            vam["structure_ssim"] = float(np.mean([structure_ssim(p, np.asarray(arr[int(r)])) for p, r in zip(vp, va["row_tg"])]))
+            score, improved = vam["structure_ssim"], vam["structure_ssim"] > best
+        else:
+            score, improved = vam["loss"], vam["loss"] < best
+        hist[-1]["val"] = vam
         if improved:
-            best, bad = vam["loss"], 0
+            best, bad = score, 0
             torch.save({"model": model.state_dict(), "norm": norm, "epoch": ep, "args": vars(args)}, ckpt)
         else:
             bad += 1
@@ -183,8 +205,8 @@ def main():
             break
     json.dump(hist, open(os.path.join(args.out_dir, f"{tag}_history.json"), "w"), indent=1)
     plot_history(hist, os.path.join(args.out_dir, f"{tag}_curves.png"))
-    best_ep = min(hist, key=lambda h: h["val"]["loss"])["epoch"]
-    print(f"Selected checkpoint: epoch {best_ep} (best val combined loss {best:.4f}) -- chosen on VAL only", flush=True)
+    best_ep = (max(hist, key=lambda h: h["val"]["structure_ssim"]) if args.select_metric == "structure" else min(hist, key=lambda h: h["val"]["loss"]))["epoch"]
+    print(f"Selected checkpoint: epoch {best_ep} (best val {args.select_metric} metric {best:.4f}) -- chosen on VAL only", flush=True)
 
     model.load_state_dict(torch.load(ckpt, map_location=device)["model"])
     if args.smoke:

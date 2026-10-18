@@ -96,17 +96,19 @@ def load_all_pair_embeddings(pairs_df, embeddings_dir, fp_to_loc):
     return data
 
 
-def drop_indices(n_total, drop_frac, rng):
+def drop_indices(n_total, drop_frac, rng, protect_latest=False):
     """
     Randomly select which of n_total chronologically-ordered observations
     to KEEP after dropping drop_frac of them, never dropping below 1
     remaining. Returns sorted indices to keep (preserves original order).
     """
-    n_drop = int(round(n_total * drop_frac))
+    # protect_latest (--drop-mode older-only): the most recent photo is never dropped, so only the older history thins out and the last photo's age is unchanged.
+    n_pool = n_total - 1 if protect_latest else n_total
+    n_drop = int(round(n_pool * drop_frac))
     n_drop = min(n_drop, n_total - 1)  # never drop below 1 remaining
     if n_drop <= 0:
         return list(range(n_total))
-    drop_idx = set(rng.choice(n_total, size=n_drop, replace=False).tolist())
+    drop_idx = set(rng.choice(n_pool, size=n_drop, replace=False).tolist())
     keep_idx = [i for i in range(n_total) if i not in drop_idx]
     return keep_idx
 
@@ -149,6 +151,9 @@ def main():
     ap.add_argument("--transformer-test-predictions", required=True,
                      help="Phase 2 transformer sweep winner's test predictions CSV, same purpose")
     ap.add_argument("--out-dir", required=True)
+    ap.add_argument("--drop-mode", choices=["any", "older-only"], default="any",
+                    help="any = original protocol (the latest photo may be dropped); older-only = the latest photo is always kept")
+    ap.add_argument("--out-prefix", default="step_p2_robustness", help="output file prefix (use a different one to avoid overwriting the original results)")
     ap.add_argument("--device", default="cpu")
     args = ap.parse_args()
 
@@ -222,7 +227,7 @@ def main():
                 if drop_frac == 0.0:
                     keep_idx = list(range(n_total))
                 else:
-                    keep_idx = drop_indices(n_total, drop_frac, rng)
+                    keep_idx = drop_indices(n_total, drop_frac, rng, protect_latest=(args.drop_mode == "older-only"))
 
                 kept_embs = d["embeddings"][keep_idx]
                 kept_days = d["days_raw"][keep_idx]
@@ -274,10 +279,10 @@ def main():
 
     os.makedirs(args.out_dir, exist_ok=True)
     trials_df = pd.DataFrame(results_rows)
-    trials_df.to_csv(os.path.join(args.out_dir, "step_p2_robustness_trials.csv"), index=False)
+    trials_df.to_csv(os.path.join(args.out_dir, f"{args.out_prefix}_trials.csv"), index=False)
 
     per_pair_df = pd.DataFrame(per_trial_rows)
-    per_pair_df.to_csv(os.path.join(args.out_dir, "step_p2_robustness_per_pair.csv"), index=False)
+    per_pair_df.to_csv(os.path.join(args.out_dir, f"{args.out_prefix}_per_pair.csv"), index=False)
 
     # --- Summarize: mean +/- std per drop level ---
     summary = trials_df.groupby("drop_frac").agg(
@@ -286,7 +291,7 @@ def main():
         transformer_mae_mean=("transformer_mae", "mean"), transformer_mae_std=("transformer_mae", "std"),
         transformer_rmse_mean=("transformer_rmse", "mean"), transformer_rmse_std=("transformer_rmse", "std"),
     ).reset_index()
-    summary.to_csv(os.path.join(args.out_dir, "step_p2_robustness_summary.csv"), index=False)
+    summary.to_csv(os.path.join(args.out_dir, f"{args.out_prefix}_summary.csv"), index=False)
 
     print("\n" + "=" * 100)
     print("MISSING-OBSERVATION ROBUSTNESS TABLE (mean +/- std over 5 seeds; drop=0% is deterministic)")
@@ -298,9 +303,9 @@ def main():
               f"Transformer MAE={row['transformer_mae_mean']:.3f}+/-{row['transformer_mae_std']:.3f}  "
               f"RMSE={row['transformer_rmse_mean']:.3f}+/-{row['transformer_rmse_std']:.3f}")
 
-    print(f"\nWrote per-trial results to {args.out_dir}/step_p2_robustness_trials.csv")
-    print(f"Wrote per-pair per-trial predictions to {args.out_dir}/step_p2_robustness_per_pair.csv")
-    print(f"Wrote summary table to {args.out_dir}/step_p2_robustness_summary.csv")
+    print(f"\nWrote per-trial results to {args.out_dir}/{args.out_prefix}_trials.csv")
+    print(f"Wrote per-pair per-trial predictions to {args.out_dir}/{args.out_prefix}_per_pair.csv")
+    print(f"Wrote summary table to {args.out_dir}/{args.out_prefix}_summary.csv")
     print("\nSTOPPING HERE for review before any README conclusions are written, per instructions.")
 
 
