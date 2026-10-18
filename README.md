@@ -6,16 +6,18 @@ Given a plant's earlier UAV photos, how well can a model forecast how it will de
 
 | Track | Question | Verdict |
 |---|---|---|
-| **1. Diameter forecasting** | Predict a plant's next diameter (mm) from its photo history | Works well: MAE 5.13 mm, 43% lower than assuming no change |
+| **1. Diameter forecasting** | Predict a plant's next diameter from its photo history | Beats persistence by 43% (MAE 5.13 vs 9.07, label units), but a simple seasonal-growth baseline that uses the last measurement is better still (4.74); see Caveats |
 | **2. Next-photo prediction** | Generate a plant's next photo from its earlier photos | Works modestly: about 2x the structure score of repeating the last photo, but the output is blurry; three sharpening attempts failed |
 
 ## Results at a glance
 
-**Track 1, diameter (110 test plants, 1,057 examples; lower is better):**
+**Track 1, diameter (110 test plants, 1,057 examples; MAE and RMSE in the dataset's label units, lower is better; see the units caveat below):**
 
-| Method | MAE (mm) | RMSE (mm) |
+| Method | MAE | RMSE |
 |---|---|---|
 | Persistence (assume no change) | 9.07 | 10.91 |
+| Age-only growth curve (no images, no measurements) | 6.63 | 9.71 |
+| Last measurement + mean growth for that step (no images) | 4.74 | 7.20 |
 | Single photo, ridge regression on frozen ResNet18 features | 5.91 | 8.66 |
 | CNN-Transformer | 5.53 | 8.67 |
 | **CNN-LSTM** | **5.13** | **8.06** |
@@ -37,7 +39,7 @@ the models' gain) while only 13% of the structure SSIM gain is. Details and defi
 
 ## What we learned
 
-- **Photo history helps for diameter** (CNN-LSTM beats the single-photo model by 13% MAE); the Transformer lost to the LSTM, with too little data the likely cause.
+- **Diameter: photos and dates help, but the simplest strong baseline is not beaten.** The CNN-LSTM beats the single-photo model by 13% MAE and persistence by 43%, and the Transformer lost to the LSTM. But an age-only curve already removes 27% of persistence's error, and persistence plus average seasonal growth (which uses the last measurement, an input the models do not receive) scores 4.74, better than the LSTM's 5.13.
 - **The next-photo gain is real but small.** It survives the controls, generalises to unseen plants (training plants 0.098 to 0.102 vs test 0.087 to 0.088), and is
   far above the run-to-run noise (about 0.0008 for a difference of two single runs).
 - **More history adds only a little** (+0.002 ConvLSTM, +0.005 Transformer), concentrated in early-season Field2 photos. A swapped-history test shows this gain depends on the
@@ -82,6 +84,13 @@ pipeline commands, in order, are in [docs/00](docs/00-dataset-and-setup.md) and 
 | [docs/04-image-track-diagnostics.md](docs/04-image-track-diagnostics.md) | Sharpening ablation (negative result), memorisation check |
 | [docs/05-reproducibility.md](docs/05-reproducibility.md) | From-scratch reproduction, noise estimates, run-to-run nondeterminism test, 42-quantity comparison |
 | [docs/status-history.md](docs/status-history.md) | The original introduction and status log |
+
+## Caveats
+
+- **Diameter units are unverified.** Neither the dataset paper nor the dataset card states a unit for the diameter labels (values 1 to 118, median 53); "mm" was an assumption and the labels may be centimetres.
+- **The split is by plant, not by plot.** All 9 plots contain both training and test plants, while the dataset paper proposes spatially disjoint splits. Results describe new plants within the observed plots, fields and seasons; a held-out-plot evaluation has not been run.
+- **Image models are not linked to biological traits.** Higher SSIM has not been shown to give better diameter, canopy or growth-stage estimates; the two tracks are evaluated separately.
+- **Cause of the blur is not isolated.** Unpredictable leaf layout is the working explanation; misregistration between consecutive photos (the paper reports shifts of up to about 10 cm between head and stem position early in growth) may contribute and has not been measured.
 
 ## Status and next steps
 

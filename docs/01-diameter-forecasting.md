@@ -2,6 +2,11 @@
 
 [Back to the project overview](../README.md)
 
+> **Units caveat (added after review).** Where this document says "mm", read "the dataset's own label units". Neither the GrowliFlower paper nor the Hugging Face dataset card states
+> the unit of the diameter labels (values range 1 to 118, median 53). A late-season cauliflower plant is much wider than 12 cm, so the labels may well be centimetres; this has not been
+> verified against the original spreadsheet. Relative comparisons (percent differences, rankings) are unaffected.
+
+
 ## Task definition
 
 Given all images and timestamps for a plant through observation `t`,
@@ -542,3 +547,31 @@ mechanism.
 1. **Multi-trait regression** — extending beyond plant diameter to
    height, head diameter, and/or BBCH developmental stage, jointly or
    per-trait.
+
+## Additional baselines (added after review): is persistence a strong enough reference?
+
+Persistence (repeat the last measured diameter) is a weak reference for a growing plant, so three further no-learning or linear baselines were added
+(`src/baselines_extra.py`; fitted on train plants, settings on validation, test scored once, same shared test set of 1,057 examples; label units as above).
+Test MAE [95% plant-bootstrap CI]:
+
+| Method | Information used | Test MAE | Field1 | Field2 |
+|---|---|---|---|---|
+| Persistence | last measured diameter | 9.07 [8.67, 9.47] | 11.97 | 8.31 |
+| Age-only growth curve | target day only (no images, no measurements) | 6.63 [5.79, 7.62] | 6.76 | 6.59 |
+| Single-frame ridge on the image (reported above) | one photo | 5.91 | | |
+| CNN-Transformer (reported above) | photo history + input days | 5.53 | | |
+| **CNN-LSTM** (reported above) | photo history + input days | **5.13** | | |
+| Last measurement + mean growth for that step | last measured diameter + calendar | **4.74** [4.35, 5.15] | 5.08 | 4.66 |
+
+**Reading.**
+- A model that uses only the plant's age at the target date already removes about 27% of persistence's error (9.07 to 6.63), so a large part of the CNN-LSTM's 43% reduction
+  reflects the usual seasonal growth pattern, not plant-specific information.
+- The CNN-LSTM still beats the age-only curve and the single-photo ridge, so photo history adds something beyond age.
+- A simple baseline that uses the last measured diameter plus the average growth for that step scores **better (4.74) than the CNN-LSTM (5.13)** on the same examples.
+- These comparisons are not like for like. The CNN-LSTM receives image features and the days of its input photos only: **no earlier diameter measurement and no target day**. Methods using the
+  last measurement or the target day have information the model lacks. The two comparisons answer different questions: "can photos and dates alone estimate the next diameter?" (the
+  LSTM does reasonably) versus "is the model better than a simple forecast when measurements are available?" (no).
+- The CNN-LSTM also is not told how far ahead it is forecasting (no target day or gap input), so it cannot be asked for different horizons from the same history.
+- Not yet run (needs the cached embeddings on Swan): an image-plus-age ridge baseline (`--embeddings-dir` option of the same script), which would make the single-photo comparison fairer, since the
+  reported ridge receives no day information.
+
