@@ -72,7 +72,13 @@ LPIPS, but not the LPIPS package). Both are for this project only; no external c
 structure SSIM against the real next photo; in the example images the input at day 51 and the target at day 83 show different leaf arrangements), so a loss that compares
 the output pixel- or feature-wise with the one real future photo is minimised by an average, and a perceptual loss minimised by a flat feature average. Sharp output would need a
 model that is rewarded for plausible texture rather than for matching the one real photo (adversarial or diffusion training). Such output would be plausible, not
-accurate; structure SSIM would probably fall, so sharpness and accuracy would have to be reported separately. **Not done:** adversarial training, multiple seeds
+accurate; structure SSIM would probably fall, so sharpness and accuracy would have to be reported separately. **Scope of the negative result (added after review).** The conclusion is limited to these configurations, one seed each, an 80-epoch budget and perceptual weight 1.0.
+(1) *Under-training:* the selected epoch was 80 (the last) for the perceptual, any-gap and full runs and 78 for residual+perceptual, so validation loss was still falling when training ended; longer training was not tried.
+(2) *Perceptual dominance:* in the perceptual run the VGG term is about 3.16 of a validation loss of 4.10 (77%), so the weight was never swept and the L1/SSIM terms play a small role.
+(3) *Selection metric:* models were selected on the combined validation loss (which includes the perceptual term in those runs), not on structure SSIM, the reported headline metric.
+(4) *Any-gap exposure confound:* each any-gap epoch samples 5,823 of 39,477 pairs uniformly, so only about 14.8% (about 859) are standard last-to-next examples, against all 5,823 in the baseline. Part of the any-gap drop in standard-task accuracy may be reduced exposure to the evaluated task, not harm from long gaps. A run that keeps all standard examples and adds long-gap ones was not done.
+(5) *Single-step only:* multi-step (recursive) forecasting was not tested.
+**Not done:** adversarial training, multiple seeds
 (the differences above are 10x-35x the ~0.0008 run-to-run noise on a pooled mean, so single seeds do not change the conclusions), applying any variant to the Transformer.
 
 ### Memorisation check: frozen models on training vs unseen plants

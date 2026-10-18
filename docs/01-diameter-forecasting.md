@@ -427,16 +427,17 @@ than assumed away:**
    encoding-quality problem. **The aliasing symptom is real but was
    directly ruled out as the cause of the Transformer's underperformance.**
 
-With that alternative explanation tested and excluded, the standing
-explanation is now evidenced rather than speculative: with only 517
-training plants and short sequences (1–14 frames), the Transformer's
-larger parameter space and weaker sequential inductive bias (versus the
-LSTM's recurrence, which enforces processing order structurally) needs
-more data than is available here to outperform an architecture that
-already assumes temporal order — consistent with Phase 1's own finding
-that the CNN-LSTM's hyperparameter landscape was already fairly flat
-(5.007–5.448 val MAE across 18 configs), suggestive of a data-limited
-regime.
+With that alternative explanation tested and excluded, the cause of the
+Transformer's deficit remains unexplained. An earlier version of this text
+attributed it to a "larger parameter space"; that is wrong. Trainable
+parameters (counted by instantiating the models): winning CNN-LSTM
+(hidden 256, 2 layers) 1,348,865; winning Transformer (d_model 64, 4 heads,
+2 layers) 101,889, about 13 times fewer. Capacity-hurting is therefore not
+established either: the d_model sensitivity check scales d_model, heads and
+feed-forward width together, so it does not isolate any one factor. Remaining
+candidate explanations (weaker sequential inductive bias with 517 training
+plants and 1 to 14 frames, optimisation, input-day encoding) have not been
+separated.
 
 Growth curve plots for the Transformer's winning config:
 `outputs/step_p2_transformer_growth_curve_<plant_id>.png` (6 test
@@ -575,3 +576,11 @@ Test MAE [95% plant-bootstrap CI]:
 - Not yet run (needs the cached embeddings on Swan): an image-plus-age ridge baseline (`--embeddings-dir` option of the same script), which would make the single-photo comparison fairer, since the
   reported ridge receives no day information.
 
+
+
+## Corrections from external review (added later)
+
+- **Robustness population.** `src/robustness_missing_obs.py` evaluates the 1,060 test examples that the CNN-LSTM and Transformer both predict, not the 1,057 persistence-restricted set used in the shared-set tables (Transformer MAE 5.587 on 1,060 vs 5.528 on 1,057). Robustness numbers are on N = 1,060.
+- **Dropping photos can drop the latest one.** The drop procedure may remove the most recent input, so part of the degradation reflects a staler last photo (a longer effective gap), not only fewer photos. It does not separate the two.
+- **Black frames in diameter inputs.** In the diameter pairs, the latest input photo is a black frame for 14 train, 4 validation and 4 test pairs (e.g. `2020_Ref_Plot1_A93::93`, last input day 91). The black frames were excluded only in the image track. A cleaned-input rerun has not been done.
+- **Positional-encoding sensitivity** (`check_pe_dmodel_sensitivity.py`) varies d_model, heads and feed-forward width together, so it cannot attribute changes to positional encoding alone.

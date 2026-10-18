@@ -30,7 +30,7 @@ Given a plant's earlier UAV photos, how well can a model forecast how it will de
 | Best control with no learning (colour correction + blur) | 0.049 | 0.217 | 14.40 |
 | Single-photo model | 0.082 | 0.254 | 14.84 |
 | ConvLSTM, last 4 photos | 0.087 | 0.258 | 14.87 |
-| **CNN-Transformer, all photos** | **0.088** | **0.259** | **14.96** |
+| CNN-Transformer, all photos | 0.088 | 0.259 | 14.96 |
 
 ![Structure SSIM of the methods](docs/img/fig3_methods.png)
 
@@ -42,9 +42,9 @@ the models' gain) while only 13% of the structure SSIM gain is. Details and defi
 - **Diameter: photos and dates help, but the simplest strong baseline is not beaten.** The CNN-LSTM beats the single-photo model by 13% MAE and persistence by 43%, and the Transformer lost to the LSTM. But an age-only curve already removes 27% of persistence's error, and persistence plus average seasonal growth (which uses the last measurement, an input the models do not receive) scores 4.74, better than the LSTM's 5.13.
 - **The next-photo gain is real but small.** It survives the controls, generalises to unseen plants (training plants 0.098 to 0.102 vs test 0.087 to 0.088), and is
   far above the run-to-run noise (about 0.0008 for a difference of two single runs).
-- **More history adds only a little** (+0.002 ConvLSTM, +0.005 Transformer), concentrated in early-season Field2 photos. A swapped-history test shows this gain depends on the
+- **More history adds only a little** (+0.002 ConvLSTM, +0.005 Transformer), concentrated in early-season Field2 photos. The Transformer and ConvLSTM are tied: +0.0012 per example (within noise), ConvLSTM ahead in Field1, Transformer ahead on 67 of 110 plants; the Transformer beats the single-photo model on 98 of 110 plants. A swapped-history test shows this gain depends on the
   plant's own earlier photos (+0.016 becomes -0.031 with another plant's photos), and that the model is fragile to inconsistent history.
-- **The pictures are blurry and cheap fixes do not help.** A residual output, a VGG perceptual loss and any-day training were each tested; none sharpened the output and the
+- **The pictures are blurry and the cheap fixes tried here do not help.** (One seed each, 80-epoch budget, perceptual weight 1.0 unswept; see docs/04 for limits.) A residual output, a VGG perceptual loss and any-day training were each tested; none sharpened the output and the
   perceptual loss made it flatter. Even real consecutive photos differ in leaf layout (copy-forward scores only 0.044), so a loss that matches the one real future photo is
   minimised by an average. Sharp output would need adversarial or diffusion training, which gives plausible rather than accurate leaves.
 
@@ -90,6 +90,8 @@ pipeline commands, in order, are in [docs/00](docs/00-dataset-and-setup.md) and 
 - **Diameter units are unverified.** Neither the dataset paper nor the dataset card states a unit for the diameter labels (values 1 to 118, median 53); "mm" was an assumption and the labels may be centimetres.
 - **The split is by plant, not by plot.** All 9 plots contain both training and test plants, while the dataset paper proposes spatially disjoint splits. Results describe new plants within the observed plots, fields and seasons; a held-out-plot evaluation has not been run.
 - **Image models are not linked to biological traits.** Higher SSIM has not been shown to give better diameter, canopy or growth-stage estimates; the two tracks are evaluated separately.
+- **Diameter inputs include black frames.** The latest input is a black frame for 14 train / 4 validation / 4 test pairs; the cleaned-input rerun has not been done. Robustness numbers are on 1,060 examples, and photo dropping can remove the latest photo.
+- **Multi-step forecasting is untested**; all results are single next-photo or next-measurement steps.
 - **Cause of the blur is not isolated.** Unpredictable leaf layout is the working explanation; misregistration between consecutive photos (the paper reports shifts of up to about 10 cm between head and stem position early in growth) may contribute and has not been measured.
 
 ## Status and next steps
