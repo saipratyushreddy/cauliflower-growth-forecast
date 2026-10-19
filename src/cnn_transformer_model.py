@@ -58,8 +58,11 @@ def continuous_sinusoidal_pe(days, d_model):
 
 class CNNTransformer(nn.Module):
     def __init__(self, input_dim=512, d_model=128, nhead=4, num_layers=2,
-                 dim_feedforward=256, dropout=0.0):
+                 dim_feedforward=256, dropout=0.0, pe_mode="sinusoid"):
         super().__init__()
+        assert pe_mode in ("sinusoid", "none", "linear")
+        self.pe_mode = pe_mode   # sinusoid = original (continuous-day sinusoidal PE); none = no timing information; linear = Linear(day/100) added to each token
+        self.day_proj = nn.Linear(1, d_model) if pe_mode == "linear" else None
         self.d_model = d_model
         # Project raw 512-dim ResNet18 embeddings into the transformer's
         # working dimension. day_after_planting is NOT concatenated into
@@ -92,8 +95,10 @@ class CNNTransformer(nn.Module):
         device = embeddings.device
 
         x = self.input_proj(embeddings)  # (B, T, d_model)
-        pe = continuous_sinusoidal_pe(days_raw, self.d_model)
-        x = x + pe
+        if self.pe_mode == "sinusoid":
+            x = x + continuous_sinusoidal_pe(days_raw, self.d_model)
+        elif self.pe_mode == "linear":
+            x = x + self.day_proj(days_raw.unsqueeze(-1) / 100.0)
 
         # Combine the causal mask and the padding mask into a single
         # additive float mask, since PyTorch deprecates mixing a float

@@ -109,7 +109,7 @@ def train_one_config(
     model = CNNTransformer(
         input_dim=512, d_model=config["d_model"], nhead=config["nhead"],
         num_layers=config["num_layers"], dim_feedforward=config["dim_feedforward"],
-        dropout=config.get("dropout", 0.0),
+        dropout=config.get("dropout", 0.0), pe_mode=config.get("pe_mode", "sinusoid"),
     ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"])
 
