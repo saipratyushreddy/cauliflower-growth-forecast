@@ -600,4 +600,12 @@ Test MAE [95% plant-bootstrap CI]:
 | CNN-Transformer | 5.462 ± 0.154 | 5.484 ± 0.079 |
 
   (mean ± SD over seeds; the original-input row retrains the fixed configuration and so differs slightly from the sweep-selected 5.134 and 5.587 reported earlier.) Removing the black frames does not change the results or the ordering of the two models beyond seed noise. Mean error on the pairs that had a black frame in their inputs is lower with cleaned inputs (LSTM 19.7 to 14.7, Transformer 21.4 to 15.4), but that is a handful of test pairs and is not a conclusion.
-- **Positional-encoding sensitivity** (`check_pe_dmodel_sensitivity.py`) varies d_model, heads and feed-forward width together, so it cannot attribute changes to positional encoding alone.
+- **Positional-encoding ablation** (`src/pe_ablation.py`; the earlier `check_pe_dmodel_sensitivity.py` varies d_model, heads and feed-forward width together, so it cannot isolate the encoding). Architecture and training fixed at the sweep winner (d_model 64, 4 heads, 2 layers, dropout 0.2, lr 3e-4); only how observation time enters changes; 3 seeds each; test N = 1,060 (mean ± SD):
+
+| Time information | Val MAE | Test MAE | Test RMSE |
+|---|---|---|---|
+| Continuous-day sinusoidal encoding (original) | 5.081 ± 0.050 | 5.462 ± 0.154 | 8.41 |
+| Learned linear term of the day | 5.341 ± 0.020 | 5.441 ± 0.070 | 8.37 |
+| None (token order only) | 5.237 ± 0.152 | 5.472 ± 0.036 | 8.39 |
+
+  Test error is the same for all three within seed noise, including with no timing information at all. Validation MAE is slightly better with the sinusoidal encoding (about 0.15 to 0.26), but that advantage does not appear on test. The Transformer therefore does not measurably use observation dates, and the continuous-time encoding design did not improve test accuracy. This also means the Transformer's deficit relative to the LSTM (which receives the day of each photo as an input) is not caused by a poor encoding of time, consistent with the aliasing check.
