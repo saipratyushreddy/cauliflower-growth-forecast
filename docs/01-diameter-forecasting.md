@@ -609,3 +609,13 @@ Test MAE [95% plant-bootstrap CI]:
 | None (token order only) | 5.237 ± 0.152 | 5.472 ± 0.036 | 8.39 |
 
   Test error is the same for all three within seed noise, including with no timing information at all. Validation MAE is slightly better with the sinusoidal encoding (about 0.15 to 0.26), but that advantage does not appear on test. The Transformer therefore does not measurably use observation dates, and the continuous-time encoding design did not improve test accuracy. This also means the Transformer's deficit relative to the LSTM (which receives the day of each photo as an input) is not caused by a poor encoding of time, consistent with the aliasing check.
+
+## Target-day input (added after review; design fixed before running)
+
+**Question.** The CNN-LSTM receives the days of its input photos but not the requested forecast day, so the same history cannot ask for different horizons. Does giving it the forecast gap help?
+
+**Design** (`src/target_day_experiment.py`, `scripts/target_day.slurm`). Baseline arm: the current sweep-winner CNN-LSTM (hidden 256, 2 layers, dropout 0.2, lr 1e-3). Target-day arm: identical, plus one extra input per timestep, (target day minus that photo's day), z-scored with train statistics (514 inputs instead of 513). Same split, batch size, 200-epoch cap, patience 15, validation-MAE epoch selection, no new hyper-parameter search; test scored once per run; both arms retrained with seeds 42, 43, 44. **Neither arm receives any earlier diameter measurement**, so both stay in the "photos and dates only" category and are not comparable with the 4.74 last-measurement baseline, which uses information they lack.
+
+**Analysis.** Paired per-example MAE difference (target-day minus baseline, each averaged over the 3 seeds), overall and by field and forecast-gap bin, with sample counts and plant-level bootstrap 95% intervals. Forecast gaps are 2 to 9 days in Field2 and up to 40 in Field1, so the horizon bins are largely a field split, and gaps of 29 days or more occur only in Field1 (199 of 7,031 pairs).
+
+**Results:** pending.

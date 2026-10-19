@@ -116,7 +116,7 @@ def train_one_config(
     val_loader = DataLoader(val_ds, batch_size=config["batch_size"], shuffle=False, collate_fn=collate_fn)
 
     model = CNNLSTM(
-        input_dim=513, hidden_dim=config["hidden_dim"],
+        input_dim=config.get("input_dim", 513), hidden_dim=config["hidden_dim"],
         num_layers=config["num_layers"], dropout=config.get("dropout", 0.0),
     ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"])
