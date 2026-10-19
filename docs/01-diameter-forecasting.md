@@ -460,8 +460,8 @@ segments already identified as the model family's shared weak point.
 **Inference-time evaluation only — no retraining, no hyperparameter
 changes.** Loads the two already-trained, frozen sweep-winner checkpoints
 (CNN-LSTM: `h256_lr0.001_L2_d0.2`; CNN-Transformer:
-`d64_h4_lr0.0003_L2_do0.2`) exactly as saved. For each of the 1,057
-shared-eval-set test pairs, at drop levels {0%, 25%, 50%, 75%} of that
+`d64_h4_lr0.0003_L2_do0.2`) exactly as saved. For each of the 1,060
+test pairs both models predict (see the correction at the end of this file), at drop levels {0%, 25%, 50%, 75%} of that
 pair's available input observations, a random subset is removed
 (chronological order preserved among what remains, never dropping below
 1 observation), and both models run inference on the **identical**
@@ -581,6 +581,22 @@ Test MAE [95% plant-bootstrap CI]:
 ## Corrections from external review (added later)
 
 - **Robustness population.** `src/robustness_missing_obs.py` evaluates the 1,060 test examples that the CNN-LSTM and Transformer both predict, not the 1,057 persistence-restricted set used in the shared-set tables (Transformer MAE 5.587 on 1,060 vs 5.528 on 1,057). Robustness numbers are on N = 1,060.
-- **Dropping photos can drop the latest one.** The drop procedure may remove the most recent input, so part of the degradation reflects a staler last photo (a longer effective gap), not only fewer photos. It does not separate the two.
-- **Black frames in diameter inputs.** In the diameter pairs, the latest input photo is a black frame for 14 train, 4 validation and 4 test pairs (e.g. `2020_Ref_Plot1_A93::93`, last input day 91). The black frames were excluded only in the image track. A cleaned-input rerun has not been done.
+- **Dropping photos can drop the latest one: rerun with the latest photo kept** (`--drop-mode older-only`, same frozen checkpoints, same 1,060 pairs, 5 seeds, MAE; `outputs/robustness_older_only_*`):
+
+| Drop level | LSTM, any photo may go (original) | LSTM, latest kept | Transformer, any photo may go (original) | Transformer, latest kept |
+|---|---|---|---|---|
+| 0% | 5.184 | 5.184 | 5.587 | 5.587 |
+| 25% | 7.023 | 5.839 | 6.677 | 5.742 |
+| 50% | 11.447 | 7.645 | 9.288 | 6.121 |
+| 75% | 18.978 | 11.791 | 13.841 | 6.859 |
+
+  Much of the original degradation came from losing the most recent photo (a staler last observation), for both models. With the latest photo kept the Transformer is nearly flat (5.59 to 6.86 at 75%), while the LSTM still degrades (5.18 to 11.79). The Transformer has lower error than the LSTM at every non-zero drop level under both protocols, so the ranking flip and its widening gap survive; the size of the degradation in the original table, and the 2-3-frame "cliff" description above, partly reflected the dropped latest photo and should be read with that in mind. The cause of the LSTM's degradation was not isolated.
+- **Black frames in diameter inputs: cleaned-input rerun** (`src/diameter_clean_rerun.py`; the sweep-winner configurations retrained with 3 seeds each; black frames removed from input sequences, 22 of 7,031 pairs changed, none dropped; test N = 1,060; MAE, label units):
+
+| Model | Original inputs | Cleaned inputs |
+|---|---|---|
+| CNN-LSTM | 5.216 ± 0.034 | 5.307 ± 0.129 |
+| CNN-Transformer | 5.462 ± 0.154 | 5.484 ± 0.079 |
+
+  (mean ± SD over seeds; the original-input row retrains the fixed configuration and so differs slightly from the sweep-selected 5.134 and 5.587 reported earlier.) Removing the black frames does not change the results or the ordering of the two models beyond seed noise. Mean error on the pairs that had a black frame in their inputs is lower with cleaned inputs (LSTM 19.7 to 14.7, Transformer 21.4 to 15.4), but that is a handful of test pairs and is not a conclusion.
 - **Positional-encoding sensitivity** (`check_pe_dmodel_sensitivity.py`) varies d_model, heads and feed-forward width together, so it cannot attribute changes to positional encoding alone.
