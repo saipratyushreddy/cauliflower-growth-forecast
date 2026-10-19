@@ -575,7 +575,7 @@ Test MAE [95% plant-bootstrap CI]:
   last measurement or the target day have information the model lacks. The two comparisons answer different questions: "can photos and dates alone estimate the next diameter?" (the
   LSTM does reasonably) versus "is the model better than a simple forecast when measurements are available?" (no).
 - The CNN-LSTM also is not told how far ahead it is forecasting (no target day or gap input), so it cannot be asked for different horizons from the same history.
-- The image-plus-age ridge baselines were run: adding the input day (5.95) or both days (5.93) to the single-photo ridge does not improve on the image-only ridge (5.91), within the bootstrap intervals. So the CNN-LSTM's advantage over a single photo is not explained by giving it the days; it comes from using the photo history.
+- The image-plus-age ridge baselines were run: adding the input day (5.95) or both days (5.93) to the single-photo ridge does not improve on the image-only ridge (5.91), within the bootstrap intervals. So the CNN-LSTM's advantage over a single photo is not explained by giving it the days; the remaining differences are the photo history and the model type (a recurrent network instead of ridge), which this comparison does not separate.
 
 
 
