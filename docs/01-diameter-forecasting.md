@@ -560,6 +560,8 @@ Test MAE [95% plant-bootstrap CI]:
 | Persistence | last measured diameter | 9.07 [8.67, 9.47] | 11.97 | 8.31 |
 | Age-only growth curve | target day only (no images, no measurements) | 6.63 [5.79, 7.62] | 6.76 | 6.59 |
 | Single-frame ridge on the image (reported above) | one photo | 5.91 | | |
+| Ridge on image + last input day | one photo + its day | 5.95 [5.29, 6.75] | 6.62 | 5.77 |
+| Ridge on image + input day + target day | one photo + both days | 5.93 [5.26, 6.74] | 6.58 | 5.76 |
 | CNN-Transformer (reported above) | photo history + input days | 5.53 | | |
 | **CNN-LSTM** (reported above) | photo history + input days | **5.13** | | |
 | Last measurement + mean growth for that step | last measured diameter + calendar | **4.74** [4.35, 5.15] | 5.08 | 4.66 |
@@ -573,8 +575,7 @@ Test MAE [95% plant-bootstrap CI]:
   last measurement or the target day have information the model lacks. The two comparisons answer different questions: "can photos and dates alone estimate the next diameter?" (the
   LSTM does reasonably) versus "is the model better than a simple forecast when measurements are available?" (no).
 - The CNN-LSTM also is not told how far ahead it is forecasting (no target day or gap input), so it cannot be asked for different horizons from the same history.
-- Not yet run (needs the cached embeddings on Swan): an image-plus-age ridge baseline (`--embeddings-dir` option of the same script), which would make the single-photo comparison fairer, since the
-  reported ridge receives no day information.
+- The image-plus-age ridge baselines were run: adding the input day (5.95) or both days (5.93) to the single-photo ridge does not improve on the image-only ridge (5.91), within the bootstrap intervals. So the CNN-LSTM's advantage over a single photo is not explained by giving it the days; it comes from using the photo history.
 
 
 
