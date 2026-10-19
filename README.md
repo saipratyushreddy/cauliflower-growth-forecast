@@ -44,7 +44,7 @@ the models' gain) while only 13% of the structure SSIM gain is. Details and defi
   far above the run-to-run noise (about 0.0008 for a difference of two single runs).
 - **More history adds only a little** (+0.002 ConvLSTM, +0.005 Transformer), concentrated in early-season Field2 photos. The Transformer and ConvLSTM are tied: +0.0012 per example (within noise), ConvLSTM ahead in Field1, Transformer ahead on 67 of 110 plants; the Transformer beats the single-photo model on 98 of 110 plants. A swapped-history test shows this gain depends on the
   plant's own earlier photos (+0.016 becomes -0.031 with another plant's photos), and that the model is fragile to inconsistent history.
-- **The pictures are blurry and the cheap fixes tried here do not help.** (One seed each, 80-epoch budget, perceptual weight 1.0 unswept; see docs/04 for limits.) A residual output, a VGG perceptual loss and any-day training were each tested; none sharpened the output and the
+- **The pictures are blurry and the cheap fixes tried here do not help.** (One seed each; a follow-up with longer training, structure-SSIM selection, perceptual weights 0.03 to 1.0 and a balanced any-day run changed nothing: see docs/04.) A residual output, a VGG perceptual loss and any-day training were each tested; none sharpened the output and the
   perceptual loss made it flatter. Even real consecutive photos differ in leaf layout (copy-forward scores only 0.044), so a loss that matches the one real future photo is
   minimised by an average. Sharp output would need adversarial or diffusion training, which gives plausible rather than accurate leaves.
 

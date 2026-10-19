@@ -72,12 +72,20 @@ LPIPS, but not the LPIPS package). Both are for this project only; no external c
 structure SSIM against the real next photo; in the example images the input at day 51 and the target at day 83 show different leaf arrangements), so a loss that compares
 the output pixel- or feature-wise with the one real future photo is minimised by an average, and a perceptual loss minimised by a flat feature average. Sharp output would need a
 model that is rewarded for plausible texture rather than for matching the one real photo (adversarial or diffusion training). Such output would be plausible, not
-accurate; structure SSIM would probably fall, so sharpness and accuracy would have to be reported separately. **Scope of the negative result (added after review).** The conclusion is limited to these configurations, one seed each, an 80-epoch budget and perceptual weight 1.0.
-(1) *Under-training:* the selected epoch was 80 (the last) for the perceptual, any-gap and full runs and 78 for residual+perceptual, so validation loss was still falling when training ended; longer training was not tried.
-(2) *Perceptual dominance:* in the perceptual run the VGG term is about 3.16 of a validation loss of 4.10 (77%), so the weight was never swept and the L1/SSIM terms play a small role.
-(3) *Selection metric:* models were selected on the combined validation loss (which includes the perceptual term in those runs), not on structure SSIM, the reported headline metric.
-(4) *Any-gap exposure confound:* each any-gap epoch samples 5,823 of 39,477 pairs uniformly, so only about 14.8% (about 859) are standard last-to-next examples, against all 5,823 in the baseline. Part of the any-gap drop in standard-task accuracy may be reduced exposure to the evaluated task, not harm from long gaps. A run that keeps all standard examples and adds long-gap ones was not done.
-(5) *Single-step only:* multi-step (recursive) forecasting was not tested.
+accurate; structure SSIM would probably fall, so sharpness and accuracy would have to be reported separately. **Scope of the negative result, and the follow-up that tested it (added after review).** The first ablation was one seed per variant, an 80-epoch budget, perceptual weight 1.0, selection on combined validation loss, and an any-gap run that saw only about 859 standard (last-photo to next-photo) examples per epoch. Each of those limits was addressed in a follow-up (`scripts/sharp_followup.sh`; up to 120 epochs, patience 25, checkpoint chosen on validation structure SSIM; single seed; test pairs 1,233; `src/followup_summary.py`):
+
+| Run | Selected epoch | Structure SSIM | RGB SSIM | Gradient sharpness ratio | VGG distance |
+|---|---|---|---|---|---|
+| No ingredient (Step C recipe) | 81 | 0.0837 | 0.2541 | 0.220 | 3.697 |
+| Perceptual weight 0.03 | 73 | 0.0835 | 0.2544 | 0.160 | 3.517 |
+| Perceptual weight 0.1 | 83 | 0.0798 | 0.2505 | 0.100 | 3.357 |
+| Perceptual weight 1.0 | 82 | 0.0546 | 0.2237 | 0.039 | 3.145 |
+| Any-gap, all standard pairs kept each epoch | 67 | 0.0837 | 0.2544 | 0.205 | 3.677 |
+
+- *Under-training is not the explanation.* Every run stopped by early stopping (epochs 92 to 108), with the selected epoch between 67 and 83, so the original 80-epoch cap was not what held the results back. The longer budget with structure-SSIM selection gives the plain model 0.0837 (original Step C: 0.082), a small gain of about twice the run-to-run noise.
+- *Perceptual weight.* Lowering the weight from 1.0 to 0.1 and 0.03 recovers accuracy, but sharpness falls monotonically as the perceptual weight rises (gradient ratio 0.22, 0.16, 0.10, 0.039) while the VGG distance improves. No tested weight sharpens the output; the perceptual loss lowers feature distance by flattening it, as before.
+- *Any-gap exposure confound.* With every standard pair kept each epoch, any-gap training matches the plain model (0.0837 vs 0.0837, sharpness 0.205 vs 0.220). So the earlier drop to 0.0722 was due to reduced exposure to the evaluated task, not harm from long-gap training; any-gap training neither helps nor sharpens.
+- *Still not tested:* adversarial or diffusion training, multiple seeds for these follow-ups, the Transformer under any variant, and multi-step (recursive) forecasting. The earlier checkpoint-selection mismatch is addressed by the structure-SSIM selection used here.
 **Not done:** adversarial training, multiple seeds
 (the differences above are 10x-35x the ~0.0008 run-to-run noise on a pooled mean, so single seeds do not change the conclusions), applying any variant to the Transformer.
 
