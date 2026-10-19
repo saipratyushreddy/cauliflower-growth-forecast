@@ -90,7 +90,7 @@ pipeline commands, in order, are in [docs/00](docs/00-dataset-and-setup.md) and 
 - **Diameter units are unverified.** Neither the dataset paper nor the dataset card states a unit for the diameter labels (values 1 to 118, median 53); "mm" was an assumption and the labels may be centimetres.
 - **The split is by plant, not by plot.** All 9 plots contain both training and test plants, while the dataset paper proposes spatially disjoint splits. Results describe new plants within the observed plots, fields and seasons; a held-out-plot evaluation has not been run.
 - **Image models are not linked to biological traits.** Higher SSIM has not been shown to give better diameter, canopy or growth-stage estimates; the two tracks are evaluated separately.
-- **Diameter inputs include black frames.** The latest input is a black frame for 14 train / 4 validation / 4 test pairs; the cleaned-input rerun has not been done. Robustness numbers are on 1,060 examples, and photo dropping can remove the latest photo.
+- **Diameter inputs include black frames.** The latest input is a black frame for 14 train / 4 validation / 4 test pairs; a three-seed rerun with the black frames removed gave the same results within seed noise (docs/01). Robustness numbers are on 1,060 examples, and photo dropping can remove the latest photo.
 - **Multi-step forecasting is untested**; all results are single next-photo or next-measurement steps.
 - **Cause of the blur is not isolated.** Unpredictable leaf layout is the working explanation; misregistration between consecutive photos (the paper reports shifts of up to about 10 cm between head and stem position early in growth) may contribute and has not been measured.
 
