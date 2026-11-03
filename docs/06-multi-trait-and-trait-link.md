@@ -155,3 +155,22 @@ family was tried.
 ## Not in scope here
 
 Held-out-plot evaluation, the alignment diagnostic, growth-stage forecasting, and adversarial or diffusion image generation.
+
+## Held-out plots: do the trait forecasts work in a plot the model never saw? (design fixed before running)
+
+**Why.** Every result above uses a plant-wise split: test plants grow in the same 9 plots as training plants, while the dataset paper recommends spatially
+disjoint splits. The prediction ranges were also too narrow on the smaller tasks because validation plants both chose the model and calibrated the range.
+
+**Design** (`src/trait_forecast_lopo.py`, `scripts/trait_forecast_lopo.slurm`).
+- *Leave one plot out.* Each of the 9 plots (Field1: 4, Field2: 5) is the test plot once. Tasks are run only where their test field has data: diameter in all 9
+  folds, head diameter and harvest timing in the 5 Field2 folds, height in the 4 Field1 folds (Field2 has height for only 32 plants).
+- *Calibration plot.* In each fold, the next plot of the same field (cyclic order) is held out for calibrating the prediction ranges only.
+- *Training and early stopping.* All other plots of both fields; 15% of their plants (fixed seed) are used only for epoch selection and the ridge alpha.
+- *Models.* The same baselines, ridge and CNN-LSTM as above, in both arms. The LSTM configuration is fixed to the one chosen per task and arm in the plant-wise run
+  (no new search); seeds 42, 43, 44, predictions averaged.
+- *Ranges.* Split-conformal from the calibration plot's absolute residuals (80% and 90%), evaluated on the test plot.
+- *Reported.* Pooled MAE over all folds with plant-bootstrap intervals; MAE per test plot (spread); coverage and width; and a like-for-like comparison on the 110
+  plant-wise test plants: their plant-split prediction (above) vs their held-out-plot prediction, same pairs.
+
+**Known limits.** The fixed LSTM configurations were chosen on plant-wise validation plants, some of which fall in a fold's test plot (small leakage of
+configuration choice). Neighbouring plots share a field, a season and flights, so this is a stronger test than the plant split but not a new site or year.
