@@ -618,4 +618,30 @@ Test MAE [95% plant-bootstrap CI]:
 
 **Analysis.** Paired per-example MAE difference (target-day minus baseline, each averaged over the 3 seeds), overall and by field and forecast-gap bin, with sample counts and plant-level bootstrap 95% intervals. Forecast gaps are 2 to 9 days in Field2 and up to 40 in Field1, so the horizon bins are largely a field split, and gaps of 29 days or more occur only in Field1 (199 of 7,031 pairs).
 
-**Results:** pending.
+**Results** (Swan job 18803185; `outputs/target_day_results.csv`, `target_day_paired.csv`, `target_day_per_pair.csv`; 1,060 test pairs, 110 plants). An
+earlier submission (job 18545111, 19 Oct) had run but was never written up. The rerun reproduced it exactly, to every printed digit.
+
+| arm | val MAE (mean ± sd, 3 seeds) | test MAE | test RMSE |
+|---|---|---|---|
+| baseline (photo days only) | 5.02 ± 0.01 | 5.22 ± 0.03 | 8.11 |
+| + target day | 5.06 ± 0.07 | 5.29 ± 0.02 | 8.25 |
+
+| subset | n pairs (plants) | baseline | + target day | difference [95% CI] | share of pairs improved |
+|---|---|---|---|---|---|
+| all | 1060 (110) | 5.22 | 5.29 | +0.07 [−0.02, 0.19] | 0.47 |
+| Field1 | 218 (37) | 5.70 | 5.65 | −0.06 [−0.22, 0.10] | 0.51 |
+| Field1, gap ≤7 d | 115 | 5.30 | 5.21 | −0.09 [−0.30, 0.11] | 0.50 |
+| Field1, gap 8–14 d | 75 | 5.17 | 5.13 | −0.04 [−0.30, 0.24] | 0.53 |
+| Field1, gap ≥29 d | 28 | 8.78 | 8.83 | +0.05 [−0.82, 0.97] | 0.50 |
+| Field2 | 842 (73) | 5.09 | 5.20 | +0.11 [−0.01, 0.24] | 0.46 |
+| Field2, gap ≤7 d | 553 | 5.61 | 5.72 | +0.11 [−0.03, 0.28] | 0.46 |
+| Field2, gap 8–14 d | 289 | 4.10 | 4.19 | +0.10 [−0.02, 0.22] | 0.45 |
+
+**What this says.** Giving the model the forecast day does not help. Overall it is 0.07 worse, and the interval includes 0. No subset shows an improvement
+with an interval excluding 0. Field2 leans slightly worse, and Field1 is flat. The long Field1 gaps (≥29 days) would be where the target day matters most, but
+there are only 28 such test pairs, and their interval (±0.9) is too wide to read either way.
+
+A likely reason: the photo-day inputs already fix the forecast horizon in most cases, because photo dates follow a fixed schedule per field. The extra input
+then adds little new information. The original model, without the target day, stays the reported one. The limitation in the caveats above still holds as
+stated: the model cannot be asked for different horizons from the same history. Adding the input makes that possible in principle, but it does not make the
+forecast more accurate.
