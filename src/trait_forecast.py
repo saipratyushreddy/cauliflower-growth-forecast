@@ -72,13 +72,13 @@ def next_pairs(seqs, split_of, trait):
     return d
 
 
-def harvest_pairs(seqs, split_of):
+def harvest_pairs(seqs, split_of, cutoffs=CUTOFFS):
     rows = []
     for pid, g in seqs.items():
         hd = g.harvest_day.iloc[0]
         if g.at[0, "field"] != "Field2" or pd.isna(hd):
             continue
-        for c in CUTOFFS:
+        for c in cutoffs:
             h = g[g.day_after_planting <= c]
             if hd <= c or len(h) == 0:
                 continue

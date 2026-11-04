@@ -215,3 +215,19 @@ head diameter 4.4 / 4.1, height 14.0 / 13.7, harvest 9.5 / 10.0 days.
 
 **Limits.** One field and season per plot group, so "unseen plot" is not "unseen site or year"; the LSTM configurations were fixed from the plant-wise
 validation run; single run per fold (3 seeds averaged).
+
+## Harvest lead time: how early can the harvest date be forecast? (design fixed before running)
+
+**Question.** The harvest results above start at day 44. Field2 has photos on days 1, 8, 16, 22, 27, 35, 44, 50, 57 and 65 before the first harvest
+(day 65 to 85, median 76). How early do photos give a useful harvest forecast?
+
+**Design** (`scripts/harvest_leadtime.slurm`: `src/trait_forecast_lopo.py --tasks harvest --harvest-cutoffs 1 8 16 22 27 35 44 50 57 65`, then
+`src/harvest_leadtime_summary.py`). Identical to the held-out-plot run (5 Field2 folds, calibration plot, fixed LSTM configuration, 3 seeds), with one model per
+arm trained on all ten cutoffs together. Before day 44 no head diameter exists, so the measurement arm then has plant diameter only. Prediction ranges are also
+calibrated per cutoff (separate conformal quantile for each cutoff on the calibration plot).
+
+**Reported per cutoff.** MAE in days of every method; image LSTM minus age-only (paired, plant-bootstrap interval) and in how many plots the LSTM is better;
+share of plants forecast within 4 days; coverage and width of the 80% range. The earliest useful cutoff is the first one where the image LSTM beats age-only
+with an interval excluding zero.
+
+**Results:** pending.
