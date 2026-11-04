@@ -230,4 +230,35 @@ calibrated per cutoff (separate conformal quantile for each cutoff on the calibr
 share of plants forecast within 4 days; coverage and width of the 80% range. The earliest useful cutoff is the first one where the image LSTM beats age-only
 with an interval excluding zero.
 
-**Results:** pending.
+**Results** (Swan job 18785496; `outputs/harvest_leadtime_by_cutoff.csv`, `_summary.csv`, `_by_plot.csv`; 470 test plants over the 5 Field2 folds, one pair
+per plant per cutoff). MAE in days on the held-out plot. Age-only predicts the same harvest day at every cutoff, so its MAE is the same everywhere (3.10).
+
+| cutoff day | days to harvest (mean) | age-only | image ridge | image LSTM | meas linear | meas LSTM | image LSTM − age-only [95% CI] | plots better | within 4 days | 80% coverage (per-cutoff / pooled) | 80% width |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1  | 76 | 3.10 | 3.10 | 3.08 | 2.97 | 3.21 | −0.02 [−0.12, 0.08] | 2/5 | 0.70 | 0.79 / 0.75 | 11.0 |
+| 8  | 69 | 3.10 | 2.88 | 2.86 | 2.85 | 2.86 | **−0.24 [−0.38, −0.10]** | 4/5 | 0.71 | 0.78 / 0.76 | 10.0 |
+| 16 | 61 | 3.10 | 2.67 | **2.63** | 2.76 | 2.71 | −0.47 [−0.62, −0.32] | 5/5 | 0.76 | 0.81 / 0.80 | 9.2 |
+| 22 | 55 | 3.10 | 2.86 | **2.63** | 2.67 | 2.68 | −0.47 [−0.62, −0.32] | 5/5 | 0.75 | 0.80 / 0.80 | 9.0 |
+| 27 | 50 | 3.10 | 2.84 | 2.66 | 2.68 | 2.71 | −0.44 [−0.60, −0.28] | 4/5 | 0.75 | 0.81 / 0.80 | 9.1 |
+| 35 | 42 | 3.10 | 3.45 | 2.81 | 2.71 | 2.88 | −0.29 [−0.48, −0.10] | 4/5 | 0.73 | 0.82 / 0.81 | 9.1 |
+| 44 | 33 | 3.10 | 3.19 | 2.77 | 2.83 | 2.84 | −0.33 [−0.50, −0.17] | 5/5 | 0.76 | 0.82 / 0.81 | 9.2 |
+| 50 | 27 | 3.10 | 3.23 | 2.68 | 3.07 | 2.79 | −0.42 [−0.59, −0.26] | 4/5 | 0.76 | 0.82 / 0.82 | 9.2 |
+| 57 | 20 | 3.10 | 3.40 | 2.73 | 3.26 | 2.89 | −0.38 [−0.57, −0.19] | 3/5 | 0.76 | 0.84 / 0.83 | 9.5 |
+| 65 | 12 | 3.09 | 3.93 | 2.85 | 2.78 | 2.83 | −0.24 [−0.41, −0.06] | 4/5 | 0.74 | 0.81 / 0.80 | 9.4 |
+
+Pooled over all cutoffs: image LSTM 2.77 [2.59, 2.95], meas LSTM 2.84, meas linear 2.86, age-only 3.10 [2.87, 3.31]. The image LSTM beats age-only in all
+5 held-out plots, though by only 0.01 days in 2021_Ref_Plot5 (3.38 vs 3.40).
+
+**What this says.**
+- **Earliest useful cutoff: day 8.** This is about 69 days before harvest. Day 1 gives nothing over age-only (−0.02, CI crosses 0).
+- **The forecast stops improving after day 16–22.** The gain peaks at −0.47 days (5/5 plots, MAE 2.63), 55–61 days before harvest. Later photos do not help:
+  the MAE stays at 2.7–2.85 up to day 65, 12 days before harvest. One possible reason, not tested here: harvest days come in waves (`harvest_timepoint`),
+  so a plant's harvest day is partly a scheduling decision, not only how mature the plant is.
+- **The gain is small.** Age-only is already within 3.1 days on average, because Field2 harvests fall in a 20-day window. The best forecast is about 0.5
+  days (15%) better. About 75% of plants are forecast within 4 days, compared with 70% at day 1.
+- **Photos vs measurements.** Image and measurement LSTMs are tied at every cutoff. The measurement-arm linear model is as good up to day 44, then worse at
+  days 50–57 (3.07, 3.26). This run trains on all ten cutoffs together, so its numbers at days 44–65 differ slightly from the held-out-plot run above,
+  which trained only on those four cutoffs (image LSTM 2.83, meas linear 2.70 pooled there).
+- **Prediction ranges.** Calibrating per cutoff fixes the under-coverage at early cutoffs: day 1 goes from 0.75 with pooled calibration to 0.79, against
+  the 0.80 target. Coverage is 0.78–0.84 at every cutoff. The 80% range is about ±4.5–5.5 days wide (width 9–11). That is wider than the whole MAE gain, so
+  the range is the more honest thing to report to a grower.
