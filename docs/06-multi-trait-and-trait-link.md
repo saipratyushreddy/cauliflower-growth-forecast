@@ -174,3 +174,44 @@ disjoint splits. The prediction ranges were also too narrow on the smaller tasks
 
 **Known limits.** The fixed LSTM configurations were chosen on plant-wise validation plants, some of which fall in a fold's test plot (small leakage of
 configuration choice). Neighbouring plots share a field, a season and flights, so this is a stronger test than the plant split but not a new site or year.
+
+**Results** (`outputs/lopo_*.csv`; job 18785283; every plant tested once by a model that never saw its plot; MAE in the dataset's units, harvest in days).
+
+*Same plants, plant split vs held-out plot* (the 110 plant-wise test plants; positive = worse when the plot is unseen; plant-bootstrap 95% interval):
+
+| Task | Age-only | Image LSTM | Last + growth | Meas. LSTM |
+|---|---|---|---|---|
+| Diameter (1,049 pairs) | 6.57 -> 6.71 (+0.14) | 5.09 -> 5.56 (+0.47 [+0.17, +0.78]) | 4.70 -> 4.81 (+0.11) | 4.60 -> 4.99 (+0.39 [+0.17, +0.62]) |
+| Head diameter (409) | 1.74 -> 1.76 (+0.02) | 1.45 -> 1.62 (+0.17 [+0.03, +0.30]) | 1.12 -> 1.13 (+0.01) | 1.20 -> 1.28 (+0.08 [-0.02, +0.18]) |
+| Height (210, Field1) | 4.31 -> 4.98 (+0.67) | 3.60 -> 4.46 (+0.86 [+0.46, +1.26]) | 3.52 -> 3.79 (+0.27) | 3.46 -> 4.26 (+0.80 [+0.41, +1.22]) |
+| Harvest, days (280) | 3.38 -> 3.50 (+0.12) | 2.50 -> 2.93 (+0.43 [+0.04, +0.86]) | 2.80 -> 2.91 (+0.12)* | 2.57 -> 2.91 (+0.34 [-0.05, +0.74]) |
+
+\* harvest: the linear model on the last head diameter and diameter.
+
+*Pooled over all held-out plots* (all plants; paired difference, and in how many test plots the learned model is better):
+
+| Task | Image LSTM vs age-only | Meas. LSTM vs last + growth | Image LSTM vs last + growth |
+|---|---|---|---|
+| Diameter (6,973 pairs, 9 plots) | -1.00 [-1.18, -0.82], 8/9 | +0.27 [+0.12, +0.42], 2/9 | +0.72 [+0.51, +0.94], 0/9 |
+| Head diameter (2,669, 5) | -0.16 [-0.21, -0.10], 5/5 | +0.11 [+0.06, +0.16], 0/5 | +0.25 [+0.17, +0.33], 0/5 |
+| Height (1,362, 4) | -0.63 [-0.91, -0.34], 2/4 | +0.28 [-0.00, +0.60], 2/4 | +0.38 [+0.08, +0.69], 2/4 |
+| Harvest, days (1,879, 5) | -0.27 [-0.43, -0.10], 4/5 | +0.18 [+0.02, +0.34], 2/5 | +0.13 [-0.02, +0.27], 3/5 |
+
+*Prediction ranges calibrated on a separate plot* (LSTM; nominal 80% / 90%): coverage 0.80 / 0.90 (diameter, image), 0.81 / 0.90 (diameter, meas.),
+0.80 / 0.90 and 0.81 / 0.91 (head diameter), 0.81 / 0.89 and 0.80 / 0.90 (height), 0.81 / 0.91 and 0.82 / 0.91 (harvest). Mean 80% widths: diameter 17.9 / 16.5,
+head diameter 4.4 / 4.1, height 14.0 / 13.7, harvest 9.5 / 10.0 days.
+
+**Reading.**
+1. *Photos still beat age alone on unseen plots, for every trait, but by less.* The image-arm gain over age-only shrinks from -1.48 to -1.00 for diameter, -0.29 to
+   -0.16 for head diameter and -0.88 to -0.27 days for harvest timing. The learned models lose 0.2 to 0.9 units when the plot is unseen, while the simple baselines
+   lose 0.0 to 0.1 (height: 0.3 to 0.7). Part of the plant-split gain was therefore familiarity with the plot.
+2. *With a measurement available, last measurement + average growth is the best forecast on unseen plots*, and the measurement-arm LSTM is slightly but
+   significantly worse for diameter, head diameter and harvest. The plant-split tie becomes a small loss.
+3. *Harvest timing from photos alone*: 2.83 days on unseen plots (age-only 3.10, linear model on measurements 2.70; photos vs measurements +0.13 [-0.02, +0.27]).
+   The earlier "photos alone are as good as measurements" holds only as "about as good, not better".
+4. *The prediction ranges are calibrated when calibrated on a separate plot*: coverage is within one to two points of nominal for every task, fixing the
+   under-coverage of the plant-wise run. A harvest forecast from photos is about +/- 4.8 days at 80%.
+5. *Plots differ*: Field1 Plot 3 is hardest for diameter (image LSTM 9.0 against 4.4 to 6.4 elsewhere); one plot dominates the height gain.
+
+**Limits.** One field and season per plot group, so "unseen plot" is not "unseen site or year"; the LSTM configurations were fixed from the plant-wise
+validation run; single run per fold (3 seeds averaged).
